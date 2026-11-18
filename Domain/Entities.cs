@@ -2,7 +2,7 @@ namespace Asistencia.Api.Domain;
 
 public abstract class Syncable
 {
-    public Guid Id { get; set; } = Guid.NewGuid();          // el cliente (web/app) puede generar el Id
+    public Guid Id { get; set; } = Guid.NewGuid();
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public bool Deleted { get; set; }                       // borrado lógico para poder sincronizar
 }

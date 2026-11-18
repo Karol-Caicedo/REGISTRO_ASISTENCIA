@@ -21,10 +21,10 @@ Abre http://localhost:5000: la web (wwwroot/index.html) se sirve desde el mismo 
 - PUT /api/grupos/{id}/asistencia  { fecha, marcas:[{estudianteId, presente}] }
 - GET /api/grupos/{id}/historico?mes=2026-11&fecha=&estado=asistieron|faltaron
 - GET /api/grupos/{id}/resumen?q=   (dashboard: totales y asistencias/faltas por estudiante)
-- GET /api/sync?since=ISO · POST /api/sync   (app local ↔ web)
+- GET /api/sync?since=ISO · POST /api/sync   (sincronización cliente ↔ servidor)
 
-## Sincronización web ↔ app local
-La app guarda todo en local (SQLite/AsyncStorage) con Id (Guid), `updatedAt` (UTC) y `deleted`.
+## Sincronización web
+El cliente guarda todo localmente con Id (Guid), `updatedAt` (UTC) y `deleted`.
 1. Push: POST /api/sync con lo modificado desde la última sincronización.
 2. Pull: GET /api/sync?since={serverTime anterior}; guarda el `serverTime` devuelto.
 Conflictos: gana el cambio con `updatedAt` más reciente. Borrados = `deleted: true` (no se eliminan filas).

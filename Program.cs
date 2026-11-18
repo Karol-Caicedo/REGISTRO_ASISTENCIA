@@ -152,7 +152,7 @@ api.MapGet("/grupos/{id:guid}/historico", async (ClaimsPrincipal u, Guid id, str
 api.MapGet("/grupos/{id:guid}/resumen", async (ClaimsPrincipal u, Guid id, string? q, IAsistenciaRepository r) =>
     await r.Resumen(Uid(u), id, q) is { } x ? Results.Ok(x) : Results.NotFound());
 
-// ===== Sincronización para la app local =====
+// ===== Sincronización =====
 api.MapGet("/sync", async (ClaimsPrincipal u, DateTime? since, IAsistenciaRepository r) => Results.Ok(await r.Pull(Uid(u), since ?? DateTime.UnixEpoch)));
 api.MapPost("/sync", async (ClaimsPrincipal u, SyncPayload p, IAsistenciaRepository r) => { await r.Push(Uid(u), p); return Results.NoContent(); });
 

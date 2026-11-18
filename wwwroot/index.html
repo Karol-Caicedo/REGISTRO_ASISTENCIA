@@ -23,7 +23,7 @@ td.c,th.c{text-align:center}.ok{color:var(--ok);font-weight:600}.ko{color:var(--
 .pill.ok{background:var(--ok);color:#fff;border-color:var(--ok)}.pill.ko{background:var(--ko);color:#fff;border-color:var(--ko)}
 </style></head><body><div class="w" id="app"></div>
 <script>
-// ===== Capa de datos: para la futura app/sincronización solo se reemplaza Repo por llamadas a una API =====
+// ===== Capa de datos =====
 const Repo={
  load(){try{return JSON.parse(localStorage.getItem('asist_v2'))||{users:{},data:{}}}catch(e){return{users:{},data:{}}}},
  save(db){try{localStorage.setItem('asist_v2',JSON.stringify(db))}catch(e){}}
@@ -641,7 +641,7 @@ function render(){
  const T=[['grupos','Grupos'],['asistencia','Asistencia'],['historico','Histórico'],['dashboard','Dashboard']];
  if(!cur()&&groups().length){S.gid=groups()[0].id;S.carrera=groups()[0].carrera;S.materia=groups()[0].materia||''}
  const has=!!cur();if(!has)S.tab='grupos';
- $('app').innerHTML=`<div class="row sp" style="margin-bottom:12px"><h1>Asistencia</h1><div class="row"><button type="button" onclick="toggleTheme()" title="Cambiar tema">${themeBtn()}</button><span class="mu" id="st">${e(st)}</span>${SY().token?'<button onclick="sync()">Sincronizar</button>':''}<span class="mu">${e(S.user)}</span><button onclick="logout()">Salir</button></div></div>
+ $('app').innerHTML=`<div class="row sp" style="margin-bottom:12px"><h1>Asistencia</h1><div class="row"><button type="button" onclick="toggleTheme()" title="Cambiar tema">${themeBtn()}</button><span class="mu">${e(S.user)}</span><button onclick="logout()">Salir</button></div></div>
  <div class="tabs">${T.map(([k,l])=>`<button class="${S.tab===k?'on':''}" onclick="S.tab='${k}';S.calOpen=false;render()">${l}</button>`).join('')}</div>
  ${has?selV():''}${S.tab==='grupos'?gruposV():S.tab==='asistencia'&&has?asisV():S.tab==='historico'&&has?histV():dashV()}`}
 setInterval(()=>sched(0),60000);addEventListener('online',()=>sched(0));
