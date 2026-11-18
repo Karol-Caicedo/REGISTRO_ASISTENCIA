@@ -62,7 +62,7 @@ string Token(Docente u) => new JsonWebTokenHandler().CreateToken(new SecurityTok
 static Guid Uid(ClaimsPrincipal u) => Guid.Parse(u.FindFirstValue("sub")!);
 static bool Valido(GrupoDto g) => !string.IsNullOrWhiteSpace(g.Carrera) && !string.IsNullOrWhiteSpace(g.Jornada)
     && g.Horarios.All(h => h.Dia is >= 0 and <= 6 && Regex.IsMatch(h.Inicio, @"^\d{2}:\d{2}$") && Regex.IsMatch(h.Fin, @"^\d{2}:\d{2}$"));
-static GrupoDto Map(Grupo g) => new(g.Id, g.Carrera, g.Jornada, g.Horarios.Select(h => new HorarioDto(h.Dia, h.Inicio, h.Fin)).ToList());
+static GrupoDto Map(Grupo g) => new(g.Id, g.Carrera, g.Jornada, g.Horarios.Select(h => new HorarioDto(h.Dia, h.Inicio, h.Fin)).ToList(), g.Materia);
 
 // ===== Autenticación =====
 app.MapGet("/api/health", () => Results.Ok("ok"));

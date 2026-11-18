@@ -45,7 +45,7 @@ const today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toISOStr
 const e=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const qParams=new URLSearchParams(window.location.search);
 const initToken=qParams.get('token'), initEmail=qParams.get('email');
-const S={user:null,mode:(initToken&&initEmail)?'reset':'login',resetToken:initToken||'',resetEmail:initEmail||'',recEmail:'',recSent:false,recLink:'',err:'',tab:'grupos',carrera:'',gid:'',date:today(),month:today().slice(0,7),fdate:'',fst:'todos',q:'',stuQ:'',asisQ:'',calOpen:false,calMonth:'',tmp:[],editTmpIdx:-1,editSchedIdx:-1,newCarrera:'',newJornada:''};
+const S={user:null,mode:(initToken&&initEmail)?'reset':'login',resetToken:initToken||'',resetEmail:initEmail||'',recEmail:'',recSent:false,recLink:'',err:'',tab:'grupos',carrera:'',materia:'',gid:'',date:today(),month:today().slice(0,7),fdate:'',fst:'todos',q:'',stuQ:'',asisQ:'',calOpen:false,calMonth:'',tmp:[],editTmpIdx:-1,editSchedIdx:-1,newCarrera:'',newMateria:'',newJornada:''};
 const $=id=>document.getElementById(id);
 const groups=()=>DB.data[S.user].groups;
 const cur=()=>groups().find(g=>g.id===S.gid);
@@ -69,7 +69,7 @@ async function auth(){
  else if(!reg&&r.status===401&&DB.users[em]===lh){const r2=await api('POST','/api/auth/register',{email:em,password:pw},'');if(r2.ok)tok=r2.body.token} // cuenta creada sin conexión
  else return fail(r.body?.error||'No se pudo autenticar.');
  DB.users[em]=lh;DB.data[em]=DB.data[em]||{groups:[]};S.user=em;SY().token=tok;Repo.save(DB);
- S.err='';S.gid=groups()[0]?.id||'';S.carrera=groups()[0]?.carrera||'';S.tab='grupos';render();sched(0);
+ S.err='';S.gid=groups()[0]?.id||'';S.carrera=groups()[0]?.carrera||'';S.materia=groups()[0]?.materia||'';S.tab='grupos';render();sched(0);
 }
 function fail(m){S.err=m;render()}
 function togglePw(id='pw', btnId='eye-btn'){
@@ -145,11 +145,11 @@ async function sync(){
  busy=true;st='Sincronizando…';stat();const ini=iso(),nw=t=>!y.pushed||t>y.pushed;
  const P={grupos:[],estudiantes:[],registros:[]};
  D.groups.forEach(g=>{
-  if(nw(g.u))P.grupos.push({id:g.id,carrera:g.carrera,jornada:g.jornada,horarios:g.horario.map(h=>({dia:+h.dia,inicio:h.ini,fin:h.fin})),updatedAt:g.u,deleted:false});
+  if(nw(g.u))P.grupos.push({id:g.id,carrera:g.carrera,jornada:g.jornada,materia:g.materia||'',horarios:g.horario.map(h=>({dia:+h.dia,inicio:h.ini,fin:h.fin})),updatedAt:g.u,deleted:false});
   g.students.forEach(s=>{
    if(nw(s.u))P.estudiantes.push({id:s.uid,grupoId:g.id,codigo:s.id,nombreCompleto:s.nombre,updatedAt:s.u,deleted:false});
    for(const d in g.records){const v=g.records[d][s.id],t=(g.ru||{})[d+'|'+s.id];if(v&&t&&nw(t))P.registros.push({id:uid(),estudianteId:s.uid,fecha:d,presente:v==='P',updatedAt:t,deleted:false})}})});
- y.tomb.forEach(t=>t.t==='g'?P.grupos.push({id:t.id,carrera:t.carrera,jornada:t.jornada,horarios:[],updatedAt:t.u,deleted:true}):t.t==='e'?P.estudiantes.push({id:t.uid,grupoId:t.gid,codigo:t.id,nombreCompleto:t.nombre,updatedAt:t.u,deleted:true}):P.registros.push({id:uid(),estudianteId:t.uid,fecha:t.fecha,presente:false,updatedAt:t.u,deleted:true}));
+ y.tomb.forEach(t=>t.t==='g'?P.grupos.push({id:t.id,carrera:t.carrera,jornada:t.jornada,materia:t.materia||'',horarios:[],updatedAt:t.u,deleted:true}):t.t==='e'?P.estudiantes.push({id:t.uid,grupoId:t.gid,codigo:t.id,nombreCompleto:t.nombre,updatedAt:t.u,deleted:true}):P.registros.push({id:uid(),estudianteId:t.uid,fecha:t.fecha,presente:false,updatedAt:t.u,deleted:true}));
  let r=await api('POST','/api/sync',P,y.token);if(!r.ok)return fin(r,y);
  y.tomb=y.tomb.filter(t=>t.u>ini);y.pushed=ini;
  r=await api('GET','/api/sync?since='+encodeURIComponent(y.since),null,y.token);if(!r.ok)return fin(r,y);
@@ -162,8 +162,8 @@ function merge(B,D){
  let ch=false;const T=x=>Date.parse(x);
  B.grupos.forEach(x=>{let g=D.groups.find(q=>q.id===x.id);
   if(x.deleted){if(g&&T(x.updatedAt)>T(g.u)){D.groups=D.groups.filter(q=>q!==g);ch=true}return}
-  if(!g){D.groups.push(g={id:x.id,carrera:'',jornada:'',horario:[],students:[],records:{},ru:{},u:'1970'});ch=true}
-  if(T(x.updatedAt)>T(g.u)){g.carrera=x.carrera;g.jornada=x.jornada;g.horario=x.horarios.map(h=>({dia:h.dia,ini:h.inicio,fin:h.fin}));g.u=x.updatedAt;ch=true}});
+  if(!g){D.groups.push(g={id:x.id,carrera:'',jornada:'',materia:'',horario:[],students:[],records:{},ru:{},u:'1970'});ch=true}
+  if(T(x.updatedAt)>T(g.u)){g.carrera=x.carrera;g.jornada=x.jornada;g.materia=x.materia||'';g.horario=x.horarios.map(h=>({dia:h.dia,ini:h.inicio,fin:h.fin}));g.u=x.updatedAt;ch=true}});
  const idx={};D.groups.forEach(g=>g.students.forEach(s=>idx[s.uid]=[g,s]));
  B.estudiantes.forEach(x=>{const g=D.groups.find(q=>q.id===x.grupoId);if(!g)return;const f=idx[x.id];
   if(x.deleted){if(f&&T(x.updatedAt)>T(f[1].u)){f[0].students=f[0].students.filter(q=>q!==f[1]);delete idx[x.id];ch=true}return}
@@ -185,7 +185,20 @@ function sortStudents(g){if(g&&Array.isArray(g.students))g.students.sort((a,b)=>
 function stats(g,s){let p=0,a=0;for(const d in g.records){const v=g.records[d][s.id];if(v==='P')p++;else if(v==='A')a++}return{p,a}}
 
 // ===== Acciones =====
-function pick(k,v){S[k]=v;if(k==='carrera'){S.gid=groups().find(g=>g.carrera===v)?.id||''}S.fdate='';S.calOpen=false;S.editSchedIdx=-1;render()}
+function pick(k,v){
+ S[k]=v;const gs=groups();
+ if(k==='carrera'){
+  const gsC=gs.filter(g=>g.carrera===v);
+  const ms=[...new Set(gsC.map(g=>g.materia||''))];
+  S.materia=ms[0]||'';
+  const match=gsC.filter(g=>(g.materia||'')===S.materia);
+  S.gid=match[0]?.id||gsC[0]?.id||'';
+ }else if(k==='materia'){
+  const match=gs.filter(g=>g.carrera===S.carrera&&(g.materia||'')===v);
+  S.gid=match[0]?.id||'';
+ }
+ S.fdate='';S.calOpen=false;S.editSchedIdx=-1;render();
+}
 function mark(idOrIdx,v){
  const g=cur();if(!g)return;
  const s=typeof idOrIdx==='string'?g.students.find(x=>x.id===idOrIdx):g.students[idOrIdx];
@@ -202,7 +215,7 @@ function mark(idOrIdx,v){
  g.ru[S.date+'|'+s.id]=iso();
  save();render();
 }
-function syncNewInputs(){const gc=$('gc'),gj=$('gj');if(gc)S.newCarrera=gc.value;if(gj)S.newJornada=gj.value}
+function syncNewInputs(){const gc=$('gc'),gj=$('gj'),gm=$('gm');if(gc)S.newCarrera=gc.value;if(gj)S.newJornada=gj.value;if(gm)S.newMateria=gm.value}
 function checkSchedConflict(d, ini, fin, opts={}){
  const diaNum = +d;
  if(opts.checkTmp && S.tmp){
@@ -221,7 +234,7 @@ function checkSchedConflict(d, ini, fin, opts={}){
    if(isCur && opts.currentSchedIdx!==undefined && opts.currentSchedIdx===idx) continue;
    const h=g.horario[idx];
    if(+h.dia===diaNum && ini<h.fin && fin>h.ini){
-    const gName = `${g.carrera} · ${g.jornada}`;
+    const gName = [g.carrera, g.materia, g.jornada].filter(Boolean).join(' · ');
     if(isCur){
      return `Conflicto de horario: Este grupo ya tiene una clase programada el ${DIAS[diaNum]} de ${h.ini} a ${h.fin}. Registra otro horario.`;
     }else{
@@ -257,13 +270,16 @@ function saveEditTmp(i){
  render();
 }
 function createGroup(){
- syncNewInputs();const c=S.newCarrera.trim(),j=S.newJornada.trim();if(!c||!j)return alert('Escribe la carrera/grupo y la jornada.');
+ syncNewInputs();const c=S.newCarrera.trim(),j=S.newJornada.trim(),m=S.newMateria.trim();
+ if(!c||!m||!j)return alert('Escribe el grupo/carrera, la asignatura/materia y la jornada.');
  for(const h of S.tmp){
   const err = checkSchedConflict(h.dia, h.ini, h.fin);
   if(err) return alert(err);
  }
- const g={id:uid(),carrera:c,jornada:j,horario:S.tmp,students:[],records:{},ru:{},u:iso()};groups().push(g);S.tmp=[];S.newCarrera='';S.newJornada='';S.editTmpIdx=-1;S.carrera=c;S.gid=g.id;save();render()}
-function delGroup(){if(confirm('¿Eliminar este grupo y todo su histórico?')){const g0=cur();SY().tomb.push({t:'g',id:g0.id,carrera:g0.carrera,jornada:g0.jornada,u:iso()});DB.data[S.user].groups=groups().filter(g=>g.id!==S.gid);S.gid=groups()[0]?.id||'';S.carrera=groups()[0]?.carrera||'';save();render()}}
+ const g={id:uid(),carrera:c,materia:m,jornada:j,horario:S.tmp,students:[],records:{},ru:{},u:iso()};
+ groups().push(g);S.tmp=[];S.newCarrera='';S.newMateria='';S.newJornada='';S.editTmpIdx=-1;
+ S.carrera=c;S.materia=m;S.gid=g.id;save();render()}
+function delGroup(){if(confirm('¿Eliminar este grupo y todo su histórico?')){const g0=cur();SY().tomb.push({t:'g',id:g0.id,carrera:g0.carrera,jornada:g0.jornada,materia:g0.materia||'',u:iso()});DB.data[S.user].groups=groups().filter(g=>g.id!==S.gid);S.gid=groups()[0]?.id||'';S.carrera=groups()[0]?.carrera||'';save();render()}}
 function addSched(){
  const g=cur();if(!g)return;
  const d=$('hd').value,i=$('hi').value,f=$('hf').value;
@@ -365,11 +381,22 @@ function authV(){
  </div></div>`;
 }
 
-function selV(){const gs=groups(),cs=[...new Set(gs.map(g=>g.carrera))],js=gs.filter(g=>g.carrera===S.carrera);
- return `<div class="card row"><div><label>Grupo</label><select onchange="pick('carrera',this.value)">${cs.map(c=>`<option ${c===S.carrera?'selected':''}>${e(c)}</option>`).join('')}</select></div>
- <div><label>Jornada</label><select onchange="S.gid=this.value;S.fdate='';S.calOpen=false;render()">${js.map(g=>`<option value="${g.id}" ${g.id===S.gid?'selected':''}>${e(g.jornada)}</option>`).join('')}</select></div>
- <div class="mu" style="flex:1;min-width:160px">${cur()?e(horTxt(cur())):''}</div></div>`}
+function selV(){
+ const gs=groups(),cs=[...new Set(gs.map(g=>g.carrera))];
+ if(cs.length&&!cs.includes(S.carrera))S.carrera=cs[0];
+ const gsC=gs.filter(g=>g.carrera===S.carrera);
+ const ms=[...new Set(gsC.map(g=>g.materia||''))];
+ if(ms.length&&!ms.includes(S.materia))S.materia=ms[0];
+ const js=gsC.filter(g=>(g.materia||'')===S.materia);
+ if(js.length&&!js.some(g=>g.id===S.gid))S.gid=js[0].id;
 
+ return `<div class="card row" style="align-items:flex-end">
+  <div style="flex:1;min-width:130px"><label>Grupo / carrera</label><select onchange="pick('carrera',this.value)" style="width:100%">${cs.map(c=>`<option ${c===S.carrera?'selected':''}>${e(c)}</option>`).join('')}</select></div>
+  <div style="flex:1;min-width:130px"><label>Asignatura / materia</label><select onchange="pick('materia',this.value)" style="width:100%">${ms.map(m=>`<option value="${e(m)}" ${m===S.materia?'selected':''}>${e(m||'(General)')}</option>`).join('')}</select></div>
+  <div style="flex:1;min-width:110px"><label>Jornada</label><select onchange="S.gid=this.value;S.fdate='';S.calOpen=false;render()" style="width:100%">${js.map(g=>`<option value="${g.id}" ${g.id===S.gid?'selected':''}>${e(g.jornada)}</option>`).join('')}</select></div>
+  <div class="mu" style="flex:1.2;min-width:160px;padding-bottom:6px">${cur()?e(horTxt(cur())):''}</div>
+ </div>`;
+}
 
 function getNearestClassDate(g, refDateStr = today()){
  if(!g || !g.horario || !g.horario.length) return refDateStr;
@@ -565,7 +592,7 @@ function gruposV(){const g=cur();
        </div>`;
      }).join('')}</div>`;
 
- let h=`<div class="card"><h2>Nuevo grupo</h2><div class="row"><div><label>Grupo / carrera</label><input id="gc" placeholder="Ingeniería de Sistemas" value="${e(S.newCarrera||'')}" oninput="S.newCarrera=this.value"></div><div><label>Jornada</label><input id="gj" placeholder="Nocturna 1" value="${e(S.newJornada||'')}" oninput="S.newJornada=this.value"></div></div>
+ let h=`<div class="card"><h2>Nuevo grupo</h2><div class="row"><div style="flex:1.2;min-width:160px"><label>Grupo / carrera</label><input id="gc" placeholder="Ingeniería de Sistemas" value="${e(S.newCarrera||'')}" oninput="S.newCarrera=this.value" style="width:100%"></div><div style="flex:1.2;min-width:160px"><label>Asignatura / materia</label><input id="gm" placeholder="Programación Web" value="${e(S.newMateria||'')}" oninput="S.newMateria=this.value" style="width:100%"></div><div style="flex:1;min-width:120px"><label>Jornada</label><input id="gj" placeholder="Nocturna 1" value="${e(S.newJornada||'')}" oninput="S.newJornada=this.value" style="width:100%"></div></div>
  <label style="margin-top:12px">Horario (agrega cada día de clase)</label><div class="row">${sch('g')}<button type="button" onclick="addTmp()">Agregar día</button></div>
  ${tmpList}<button class="p" style="margin-top:8px" onclick="createGroup()">Crear grupo</button></div>`;
 
@@ -594,7 +621,7 @@ function gruposV(){const g=cur();
    const sq = (S.stuQ || '').toLowerCase().trim();
    const listStudents = g.students.filter(s => !sq || s.id.toLowerCase().includes(sq) || s.nombre.toLowerCase().includes(sq));
 
-   h+=`<div class="card"><div class="row sp"><h2>${e(g.carrera)} · ${e(g.jornada)}</h2><button class="d" onclick="delGroup()">Eliminar grupo</button></div>
+   h+=`<div class="card"><div class="row sp"><h2>${e(g.carrera)}${g.materia ? ' · ' + e(g.materia) : ''} · ${e(g.jornada)}</h2><button class="d" onclick="delGroup()">Eliminar grupo</button></div>
    <label>Horario</label>
    ${gList}
    <div class="row" style="margin-top:8px">${sch('h')}<button type="button" onclick="addSched()">Agregar día</button></div>
@@ -612,7 +639,7 @@ function render(){
  if(!S.user){$('app').innerHTML=authV();return}
  if(groups())groups().forEach(g=>sortStudents(g));
  const T=[['grupos','Grupos'],['asistencia','Asistencia'],['historico','Histórico'],['dashboard','Dashboard']];
- if(!cur()&&groups().length){S.gid=groups()[0].id;S.carrera=groups()[0].carrera}
+ if(!cur()&&groups().length){S.gid=groups()[0].id;S.carrera=groups()[0].carrera;S.materia=groups()[0].materia||''}
  const has=!!cur();if(!has)S.tab='grupos';
  $('app').innerHTML=`<div class="row sp" style="margin-bottom:12px"><h1>Asistencia</h1><div class="row"><button type="button" onclick="toggleTheme()" title="Cambiar tema">${themeBtn()}</button><span class="mu" id="st">${e(st)}</span>${SY().token?'<button onclick="sync()">Sincronizar</button>':''}<span class="mu">${e(S.user)}</span><button onclick="logout()">Salir</button></div></div>
  <div class="tabs">${T.map(([k,l])=>`<button class="${S.tab===k?'on':''}" onclick="S.tab='${k}';S.calOpen=false;render()">${l}</button>`).join('')}</div>

@@ -20,6 +20,7 @@ public class Grupo : Syncable
     public Guid DocenteId { get; set; }
     public string Carrera { get; set; } = "";
     public string Jornada { get; set; } = "";
+    public string Materia { get; set; } = "";
     public List<Horario> Horarios { get; set; } = new();
     public List<Estudiante> Estudiantes { get; set; } = new();
 }

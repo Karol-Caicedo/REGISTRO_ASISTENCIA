@@ -20,7 +20,7 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
 
     public async Task<Grupo> CrearGrupo(Guid d, GrupoDto x)
     {
-        var g = new Grupo { DocenteId = d, Carrera = x.Carrera.Trim(), Jornada = x.Jornada.Trim(), Horarios = x.Horarios.Select(H).ToList() };
+        var g = new Grupo { DocenteId = d, Carrera = x.Carrera.Trim(), Jornada = x.Jornada.Trim(), Materia = (x.Materia ?? "").Trim(), Horarios = x.Horarios.Select(H).ToList() };
         if (x.Id is Guid id) g.Id = id;
         db.Grupos.Add(g); await db.SaveChangesAsync(); return g;
     }
@@ -28,7 +28,7 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
     public async Task<bool> ActualizarGrupo(Guid d, Guid id, GrupoDto x)
     {
         var g = await Grupo(d, id); if (g is null) return false;
-        g.Carrera = x.Carrera.Trim(); g.Jornada = x.Jornada.Trim(); g.UpdatedAt = DateTime.UtcNow;
+        g.Carrera = x.Carrera.Trim(); g.Jornada = x.Jornada.Trim(); g.Materia = (x.Materia ?? "").Trim(); g.UpdatedAt = DateTime.UtcNow;
         db.Horarios.RemoveRange(g.Horarios); g.Horarios = x.Horarios.Select(H).ToList();
         await db.SaveChangesAsync(); return true;
     }
@@ -119,7 +119,7 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
         var es = await db.Estudiantes.Where(e => gids.Contains(e.GrupoId) && e.UpdatedAt > since).ToListAsync();
         var rs = await db.Registros.Where(r => gids.Contains(r.Estudiante!.GrupoId) && r.UpdatedAt > since).ToListAsync();
         return new SyncPayload(
-            gs.Select(g => new SyncGrupo(g.Id, g.Carrera, g.Jornada, g.Horarios.Select(HD).ToList(), g.UpdatedAt, g.Deleted)).ToList(),
+            gs.Select(g => new SyncGrupo(g.Id, g.Carrera, g.Jornada, g.Horarios.Select(HD).ToList(), g.UpdatedAt, g.Deleted, g.Materia)).ToList(),
             es.Select(e => new SyncEstudiante(e.Id, e.GrupoId, e.Codigo, e.NombreCompleto, e.UpdatedAt, e.Deleted)).ToList(),
             rs.Select(r => new SyncRegistro(r.Id, r.EstudianteId, r.Fecha, r.Presente, r.UpdatedAt, r.Deleted)).ToList(),
             DateTime.UtcNow);
@@ -134,12 +134,12 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
             if (mine.TryGetValue(s.Id, out var g))
             {
                 if (t <= g.UpdatedAt) continue;
-                g.Carrera = s.Carrera; g.Jornada = s.Jornada; g.Deleted = s.Deleted; g.UpdatedAt = t;
+                g.Carrera = s.Carrera; g.Jornada = s.Jornada; g.Materia = s.Materia ?? ""; g.Deleted = s.Deleted; g.UpdatedAt = t;
                 db.Horarios.RemoveRange(g.Horarios); g.Horarios = s.Horarios.Select(H).ToList();
             }
             else if (!await db.Grupos.AnyAsync(x => x.Id == s.Id))
             {
-                var n = new Grupo { Id = s.Id, DocenteId = d, Carrera = s.Carrera, Jornada = s.Jornada, Deleted = s.Deleted, UpdatedAt = t, Horarios = s.Horarios.Select(H).ToList() };
+                var n = new Grupo { Id = s.Id, DocenteId = d, Carrera = s.Carrera, Jornada = s.Jornada, Materia = s.Materia ?? "", Deleted = s.Deleted, UpdatedAt = t, Horarios = s.Horarios.Select(H).ToList() };
                 db.Grupos.Add(n); mine[n.Id] = n;
             }
         }

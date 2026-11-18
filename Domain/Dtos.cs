@@ -5,13 +5,13 @@ public record AuthRes(string Token, string Email);
 public record ForgotReq(string Email);
 public record ResetWithTokenReq(string Email, string Token, string NewPassword);
 public record HorarioDto(int Dia, string Inicio, string Fin);
-public record GrupoDto(Guid? Id, string Carrera, string Jornada, List<HorarioDto> Horarios);
+public record GrupoDto(Guid? Id, string Carrera, string Jornada, List<HorarioDto> Horarios, string Materia = "");
 public record EstudianteDto(string Codigo, string NombreCompleto);
 public record MarcaDto(Guid EstudianteId, bool Presente);
 public record AsistenciaReq(DateOnly Fecha, List<MarcaDto> Marcas);
 
 // Sincronización (web <-> app local)
-public record SyncGrupo(Guid Id, string Carrera, string Jornada, List<HorarioDto> Horarios, DateTime UpdatedAt, bool Deleted);
+public record SyncGrupo(Guid Id, string Carrera, string Jornada, List<HorarioDto> Horarios, DateTime UpdatedAt, bool Deleted, string Materia = "");
 public record SyncEstudiante(Guid Id, Guid GrupoId, string Codigo, string NombreCompleto, DateTime UpdatedAt, bool Deleted);
 public record SyncRegistro(Guid Id, Guid EstudianteId, DateOnly Fecha, bool Presente, DateTime UpdatedAt, bool Deleted);
 public record SyncPayload(List<SyncGrupo> Grupos, List<SyncEstudiante> Estudiantes, List<SyncRegistro> Registros, DateTime? ServerTime = null);
