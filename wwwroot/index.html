@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sistema de Asistencia</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#f4f7fa;--card:#FFFFFF;--tx:#1d2330;--mu:#5f6b7d;--bd:#dde3ea;--pr:#005B9B;--ok:#008000;--ko:#c8372d;--ac:#F2C500}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--bg:#10151c;--card:#19212b;--tx:#e8ebf3;--mu:#9aa6b8;--bd:#2a3442;--pr:#3d9be0;--ok:#3fbf3f;--ko:#ff7a72;--ac:#F2C500}}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#10151c;--card:#19212b;--tx:#e8ebf3;--mu:#9aa6b8;--bd:#2a3442;--pr:#3d9be0;--ok:#3fbf3f;--ko:#ff7a72;--ac:#F2C500}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+.w{max-width:960px;margin:0 auto;padding:14px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:12px}
+h1{font-size:20px;margin:0;color:var(--pr);border-left:6px solid var(--ac);padding-left:10px}h2{font-size:16px;margin:0 0 10px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.sp{justify-content:space-between}
+label{font-size:12px;color:var(--mu);display:block;margin-bottom:3px}
+input,select,button{font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--tx)}
+button{cursor:pointer}button.p{background:var(--pr);color:#fff;border-color:var(--pr)}button.d{color:var(--ko)}
+.tabs{display:flex;gap:6px;overflow-x:auto;margin-bottom:12px}.tabs button.on{background:var(--pr);color:#fff;border-color:var(--pr);box-shadow:inset 0 -3px 0 var(--ac)}
+.sc{overflow-x:auto}table{border-collapse:collapse;width:100%}th,td{padding:7px 9px;border-bottom:1px solid var(--bd);text-align:left;white-space:nowrap}
+td.c,th.c{text-align:center}.ok{color:var(--ok);font-weight:600}.ko{color:var(--ko);font-weight:600}.mu{color:var(--mu)}
+.msg{color:var(--ko);font-size:13px;margin:8px 0}.kpi{flex:1;min-width:120px;text-align:center}.kpi b{display:block;font-size:26px}
+.bar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--bd);min-width:120px;flex:1}
+.bar i{display:block}.pill{padding:3px 9px;border-radius:99px;border:1px solid var(--bd);font-size:13px}
+.pill.ok{background:var(--ok);color:#fff;border-color:var(--ok)}.pill.ko{background:var(--ko);color:#fff;border-color:var(--ko)}
+</style></head><body><div class="w" id="app"></div>
+<script>
+// ===== Capa de datos: para la futura app/sincronización solo se reemplaza Repo por llamadas a una API =====
+const Repo={
+ load(){try{return JSON.parse(localStorage.getItem('asist_v2'))||{users:{},data:{}}}catch(e){return{users:{},data:{}}}},
+ save(db){try{localStorage.setItem('asist_v2',JSON.stringify(db))}catch(e){}}
+};
+let DB=Repo.load();let API='';try{API=localStorage.getItem('asist_api')||''}catch(e){}
+const save=()=>{Repo.save(DB);if(S.user)sched()};
+const DIAS=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+const MESES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+const today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toISOString().slice(0,10);
+const e=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const S={user:null,mode:'login',err:'',tab:'asistencia',carrera:'',gid:'',date:today(),month:today().slice(0,7),fdate:'',fst:'todos',q:'',tmp:[]};
+const $=id=>document.getElementById(id);
+const groups=()=>DB.data[S.user].groups;
+const cur=()=>groups().find(g=>g.id===S.gid);
+async function hash(em,p){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(em+':'+p));return[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}
+
+// ===== Autenticación =====
+const uid=()=>crypto.randomUUID?crypto.randomUUID():'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return(c=='x'?r:r&3|8).toString(16)});
+const iso=()=>new Date().toISOString();
+const SY=()=>(DB.data[S.user].sync=DB.data[S.user].sync||{token:'',since:'1970-01-01T00:00:00.000Z',pushed:'',tomb:[]});
+async function api(m,p,b,tok){try{const r=await fetch(API+p,{method:m,signal:AbortSignal.timeout(8000),headers:{'Content-Type':'application/json',...(tok?{Authorization:'Bearer '+tok}:{})},body:b?JSON.stringify(b):undefined});let j=null;try{j=await r.json()}catch(e){}return{ok:r.ok,status:r.status,body:j}}catch(e){return{net:true}}}
+async function auth(){
+ const em=$('em').value.trim().toLowerCase(),pw=$('pw').value,reg=S.mode==='reg';
+ if(!/^[a-z0-9._+-]+@gmail\.com$/.test(em))return fail('Usa un correo Gmail válido (@gmail.com).');
+ if(reg&&!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/.test(pw))return fail('La contraseña debe tener mínimo 8 caracteres, con mayúsculas, minúsculas y números.');
+ const lh=await hash(em,pw);let tok='';
+ const sv=$('sv');if(sv){API=sv.value.trim().replace(/\/$/,'');try{localStorage.setItem('asist_api',API)}catch(e){}}
+ const r=await api('POST','/api/auth/'+(reg?'register':'login'),{email:em,password:pw},'');
+ if(r.net){ // sin servidor: modo local
+  if(reg){if(DB.users[em])return fail('Ese correo ya está registrado.')}else if(DB.users[em]!==lh)return fail('Correo o contraseña incorrectos.')
+ }else if(r.ok)tok=r.body.token;
+ else if(!reg&&r.status===401&&DB.users[em]===lh){const r2=await api('POST','/api/auth/register',{email:em,password:pw},'');if(r2.ok)tok=r2.body.token} // cuenta creada sin conexión
+ else return fail(r.body?.error||'No se pudo autenticar.');
+ DB.users[em]=lh;DB.data[em]=DB.data[em]||{groups:[]};S.user=em;SY().token=tok;Repo.save(DB);
+ S.err='';S.gid=groups()[0]?.id||'';S.carrera=groups()[0]?.carrera||'';S.tab=groups().length?'asistencia':'grupos';render();sched(0);
+}
+function fail(m){S.err=m;render()}
+
+// ===== Sincronización (local primero; last-write-wins por fecha de actualización) =====
+let st='',tm=null,busy=false,again=false;
+const stat=()=>{const x=$('st');if(x)x.textContent=st};
+const sched=(ms=1500)=>{clearTimeout(tm);tm=setTimeout(sync,ms)};
+function logout(){if(S.user){SY().token='';Repo.save(DB)}S.user=null;st='';render()}
+function fin(r,y){busy=false;if(r.net)st='Sin conexión · cambios pendientes';else if(r.status===401){y.token='';st='Sesión expirada: vuelve a iniciar sesión'}else st='Error de sincronización';stat();if(again){again=false;if(!r.net)sched()}}
+async function sync(){
+ if(!S.user)return;if(busy){again=true;return}
+ const em=S.user,D=DB.data[em],y=SY();if(!y.token)return;
+ busy=true;st='Sincronizando…';stat();const ini=iso(),nw=t=>!y.pushed||t>y.pushed;
+ const P={grupos:[],estudiantes:[],registros:[]};
+ D.groups.forEach(g=>{
+  if(nw(g.u))P.grupos.push({id:g.id,carrera:g.carrera,jornada:g.jornada,horarios:g.horario.map(h=>({dia:+h.dia,inicio:h.ini,fin:h.fin})),updatedAt:g.u,deleted:false});
+  g.students.forEach(s=>{
+   if(nw(s.u))P.estudiantes.push({id:s.uid,grupoId:g.id,codigo:s.id,nombreCompleto:s.nombre,updatedAt:s.u,deleted:false});
+   for(const d in g.records){const v=g.records[d][s.id],t=(g.ru||{})[d+'|'+s.id];if(v&&t&&nw(t))P.registros.push({id:uid(),estudianteId:s.uid,fecha:d,presente:v==='P',updatedAt:t,deleted:false})}})});
+ y.tomb.forEach(t=>t.t==='g'?P.grupos.push({id:t.id,carrera:t.carrera,jornada:t.jornada,horarios:[],updatedAt:t.u,deleted:true}):P.estudiantes.push({id:t.uid,grupoId:t.gid,codigo:t.id,nombreCompleto:t.nombre,updatedAt:t.u,deleted:true}));
+ let r=await api('POST','/api/sync',P,y.token);if(!r.ok)return fin(r,y);
+ y.tomb=y.tomb.filter(t=>t.u>ini);y.pushed=ini;
+ r=await api('GET','/api/sync?since='+encodeURIComponent(y.since),null,y.token);if(!r.ok)return fin(r,y);
+ const ch=merge(r.body,D);y.since=new Date(Date.parse(r.body.serverTime)-3e5).toISOString(); // 5 min de solape por diferencias de reloj
+ Repo.save(DB);busy=false;st='Sincronizado '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+ if(S.user===em&&ch&&!document.activeElement?.matches('input,textarea,select'))render();else stat();
+ if(again){again=false;sched()}
+}
+function merge(B,D){
+ let ch=false;const T=x=>Date.parse(x);
+ B.grupos.forEach(x=>{let g=D.groups.find(q=>q.id===x.id);
+  if(x.deleted){if(g&&T(x.updatedAt)>T(g.u)){D.groups=D.groups.filter(q=>q!==g);ch=true}return}
+  if(!g){D.groups.push(g={id:x.id,carrera:'',jornada:'',horario:[],students:[],records:{},ru:{},u:'1970'});ch=true}
+  if(T(x.updatedAt)>T(g.u)){g.carrera=x.carrera;g.jornada=x.jornada;g.horario=x.horarios.map(h=>({dia:h.dia,ini:h.inicio,fin:h.fin}));g.u=x.updatedAt;ch=true}});
+ const idx={};D.groups.forEach(g=>g.students.forEach(s=>idx[s.uid]=[g,s]));
+ B.estudiantes.forEach(x=>{const g=D.groups.find(q=>q.id===x.grupoId);if(!g)return;const f=idx[x.id];
+  if(x.deleted){if(f&&T(x.updatedAt)>T(f[1].u)){f[0].students=f[0].students.filter(q=>q!==f[1]);delete idx[x.id];ch=true}return}
+  if(!f){const s={uid:x.id,id:x.codigo,nombre:x.nombreCompleto,u:x.updatedAt};g.students.push(s);idx[x.id]=[g,s];ch=true}
+  else if(T(x.updatedAt)>T(f[1].u)){f[1].id=x.codigo;f[1].nombre=x.nombreCompleto;f[1].u=x.updatedAt;ch=true}});
+ B.registros.forEach(x=>{const f=idx[x.estudianteId];if(!f)return;const[g,s]=f,k=x.fecha+'|'+s.id;g.ru=g.ru||{};
+  if(g.ru[k]&&T(x.updatedAt)<=T(g.ru[k]))return;
+  g.records[x.fecha]=g.records[x.fecha]||{};if(x.deleted)delete g.records[x.fecha][s.id];else g.records[x.fecha][s.id]=x.presente?'P':'A';g.ru[k]=x.updatedAt;ch=true});
+ return ch}
+
+// ===== Utilidades =====
+function classDates(g,m){
+ const[y,mo]=m.split('-').map(Number),n=new Date(y,mo,0).getDate(),s=new Set();
+ for(let d=1;d<=n;d++)if(g.horario.some(h=>+h.dia===new Date(y,mo-1,d).getDay()))s.add(`${m}-${String(d).padStart(2,'0')}`);
+ Object.keys(g.records).forEach(k=>k.startsWith(m)&&s.add(k));return[...s].sort()}
+const fmt=d=>{const[y,m,x]=d.split('-');return `${DIAS[new Date(y,m-1,x).getDay()].slice(0,3)} ${+x}`};
+const horTxt=g=>g.horario.length?g.horario.map(h=>`${DIAS[h.dia]} ${h.ini}–${h.fin}`).join(' · '):'Sin horario';
+function stats(g,s){let p=0,a=0;for(const d in g.records){const v=g.records[d][s.id];if(v==='P')p++;else if(v==='A')a++}return{p,a}}
+
+// ===== Acciones =====
+function pick(k,v){S[k]=v;if(k==='carrera'){S.gid=groups().find(g=>g.carrera===v)?.id||''}S.fdate='';render()}
+function mark(i,v){const g=cur(),s=g.students[i];(g.records[S.date]=g.records[S.date]||{})[s.id]=v;(g.ru=g.ru||{})[S.date+'|'+s.id]=iso();save();render()}
+function markAll(v){const g=cur();g.records[S.date]=g.records[S.date]||{};g.ru=g.ru||{};g.students.forEach(s=>{g.records[S.date][s.id]=v;g.ru[S.date+'|'+s.id]=iso()});save();render()}
+function addTmp(){S.tmp.push({dia:$('gd').value,ini:$('gi').value,fin:$('gf').value});render()}
+function createGroup(){
+ const c=$('gc').value.trim(),j=$('gj').value.trim();if(!c||!j)return alert('Escribe la carrera/grupo y la jornada.');
+ const g={id:uid(),carrera:c,jornada:j,horario:S.tmp,students:[],records:{},ru:{},u:iso()};groups().push(g);S.tmp=[];S.carrera=c;S.gid=g.id;save();render()}
+function delGroup(){if(confirm('¿Eliminar este grupo y todo su histórico?')){const g0=cur();SY().tomb.push({t:'g',id:g0.id,carrera:g0.carrera,jornada:g0.jornada,u:iso()});DB.data[S.user].groups=groups().filter(g=>g.id!==S.gid);S.gid=groups()[0]?.id||'';S.carrera=groups()[0]?.carrera||'';save();render()}}
+function addSched(){const g=cur();g.horario.push({dia:$('hd').value,ini:$('hi').value,fin:$('hf').value});g.u=iso();save();render()}
+function delSched(i){const g=cur();g.horario.splice(i,1);g.u=iso();save();render()}
+function addStu(){const g=cur(),id=$('si').value.trim(),n=$('sn').value.trim();if(!id||!n)return;
+ if(g.students.some(s=>s.id===id))return alert('Ya existe un estudiante con ese identificador.');g.students.push({uid:uid(),id,nombre:n,u:iso()});save();render()}
+function bulk(){const g=cur();$('sb').value.split('\n').forEach(l=>{const[i,...n]=l.split(/[,;\t]/);const id=(i||'').trim(),nm=n.join(' ').trim();
+ if(id&&nm&&!g.students.some(s=>s.id===id))g.students.push({uid:uid(),id,nombre:nm,u:iso()})});save();render()}
+function delStu(i){if(confirm('¿Quitar estudiante?')){const g=cur(),s=g.students[i];SY().tomb.push({t:'e',uid:s.uid,gid:g.id,id:s.id,nombre:s.nombre,u:iso()});g.students.splice(i,1);save();render()}}
+
+// ===== Vistas =====
+function authV(){const r=S.mode==='reg';return `<div class="card" style="max-width:380px;margin:8vh auto"><h1>Sistema de Asistencia</h1><p class="mu">${r?'Crea tu cuenta de docente':'Inicia sesión'}</p>
+<label>Correo Gmail</label><input id="em" type="email" placeholder="docente@gmail.com" style="width:100%"><br><br>
+<label>Contraseña</label><input id="pw" type="password" style="width:100%" onkeydown="if(event.key==='Enter')auth()">
+${r?'<div class="mu" style="font-size:12px;margin-top:4px">Mínimo 8 caracteres con mayúsculas, minúsculas y números.</div>':''}
+<details style="margin-top:8px"><summary class="mu">Servidor (opcional)</summary><input id="sv" value="${e(API)}" placeholder="vacío = mismo servidor" style="width:100%"></details><div class="msg">${e(S.err)}</div><button class="p" style="width:100%" onclick="auth()">${r?'Registrarme':'Entrar'}</button>
+<p style="text-align:center"><a href="#" onclick="S.mode='${r?'login':'reg'}';S.err='';render();return false">${r?'Ya tengo cuenta':'Crear cuenta nueva'}</a></p></div>`}
+
+function selV(){const gs=groups(),cs=[...new Set(gs.map(g=>g.carrera))],js=gs.filter(g=>g.carrera===S.carrera);
+ return `<div class="card row"><div><label>Grupo</label><select onchange="pick('carrera',this.value)">${cs.map(c=>`<option ${c===S.carrera?'selected':''}>${e(c)}</option>`).join('')}</select></div>
+ <div><label>Jornada</label><select onchange="S.gid=this.value;S.fdate='';render()">${js.map(g=>`<option value="${g.id}" ${g.id===S.gid?'selected':''}>${e(g.jornada)}</option>`).join('')}</select></div>
+ <div class="mu" style="flex:1;min-width:160px">${cur()?e(horTxt(cur())):''}</div></div>`}
+
+function asisV(){const g=cur();const isC=g.horario.some(h=>+h.dia===new Date(S.date+'T00:00').getDay());const rec=g.records[S.date]||{};
+ return `<div class="card"><div class="row sp"><h2>Tomar asistencia</h2><div class="row"><input type="date" value="${S.date}" onchange="S.date=this.value;render()">
+ <button onclick="markAll('P')">Todos presentes</button></div></div>
+ ${isC?'':'<div class="msg" style="color:var(--mu)">Esta fecha no coincide con el horario del grupo (puedes registrarla igualmente).</div>'}
+ ${g.students.length?`<div class="sc"><table><tr><th>Identificador</th><th>Nombre completo</th><th class="c">Asistencia</th></tr>${g.students.map((s,i)=>`<tr><td>${e(s.id)}</td><td>${e(s.nombre)}</td><td class="c">
+ <button class="pill ${rec[s.id]==='P'?'ok':''}" onclick="mark(${i},'P')">Asistió</button> <button class="pill ${rec[s.id]==='A'?'ko':''}" onclick="mark(${i},'A')">Faltó</button></td></tr>`).join('')}</table></div>`:'<p class="mu">Agrega estudiantes en la pestaña Grupos.</p>'}</div>`}
+
+function histV(){const g=cur(),ds=classDates(g,S.month),[y,m]=S.month.split('-'),f=S.fst;
+ let body='';
+ if(S.fdate){const r=g.records[S.fdate]||{};const rows=g.students.filter(s=>f==='todos'||(f==='P'?r[s.id]==='P':r[s.id]!=='P'&&f==='A'?r[s.id]==='A':false));
+  body=`<table><tr><th>Identificador</th><th>Nombre completo</th><th class="c">Estado</th></tr>${rows.map(s=>`<tr><td>${e(s.id)}</td><td>${e(s.nombre)}</td><td class="c ${r[s.id]==='P'?'ok':r[s.id]==='A'?'ko':'mu'}">${r[s.id]==='P'?'Asistió':r[s.id]==='A'?'Faltó':'Sin registrar'}</td></tr>`).join('')}</table>`}
+ else{const rows=g.students.filter(s=>{if(f==='todos')return true;return ds.some(d=>g.records[d]?.[s.id]===f)});
+  body=`<table><tr><th>Id</th><th>Nombre</th>${ds.map(d=>`<th class="c">${fmt(d)}</th>`).join('')}<th class="c">Asist.</th><th class="c">Faltas</th></tr>${rows.map(s=>{let p=0,a=0;return `<tr><td>${e(s.id)}</td><td>${e(s.nombre)}</td>${ds.map(d=>{const v=g.records[d]?.[s.id];v==='P'&&p++;v==='A'&&a++;return `<td class="c ${v==='P'?'ok':v==='A'?'ko':'mu'}">${v==='P'?'✓':v==='A'?'✗':'–'}</td>`}).join('')}<td class="c ok">${p}</td><td class="c ko">${a}</td></tr>`}).join('')}</table>`}
+ return `<div class="card"><h2>Histórico de ${MESES[+m-1]} ${y}</h2><div class="row" style="margin-bottom:10px">
+ <div><label>Mes</label><input type="month" value="${S.month}" onchange="S.month=this.value;S.fdate='';render()"></div>
+ <div><label>Fecha</label><select onchange="S.fdate=this.value;render()"><option value="">Todo el mes</option>${ds.map(d=>`<option value="${d}" ${d===S.fdate?'selected':''}>${fmt(d)}</option>`).join('')}</select></div>
+ <div><label>Mostrar</label><select onchange="S.fst=this.value;render()"><option value="todos">Todos</option><option value="P" ${f==='P'?'selected':''}>Asistieron</option><option value="A" ${f==='A'?'selected':''}>Faltaron</option></select></div></div>
+ <div class="sc">${g.students.length?body:'<p class="mu">Sin estudiantes.</p>'}</div></div>`}
+
+function dashV(){const g=cur(),q=S.q.toLowerCase(),ses=Object.keys(g.records).length;let tp=0,ta=0;
+ const rows=g.students.map(s=>({s,...stats(g,s)}));rows.forEach(r=>{tp+=r.p;ta+=r.a});
+ const pct=tp+ta?Math.round(tp/(tp+ta)*100):0;
+ const list=rows.filter(r=>!q||r.s.id.toLowerCase().includes(q)||r.s.nombre.toLowerCase().includes(q));
+ return `<div class="row" style="margin-bottom:12px"><div class="card kpi"><b>${g.students.length}</b>Estudiantes</div><div class="card kpi"><b>${ses}</b>Clases registradas</div><div class="card kpi"><b class="ok">${pct}%</b>Asistencia promedio</div></div>
+ <div class="card"><div class="row sp"><h2>Asistencias y faltas por estudiante</h2><input placeholder="Buscar por id o nombre" value="${e(S.q)}" oninput="S.q=this.value;render();const i=document.getElementById('q2');i&&(i.focus(),i.setSelectionRange(99,99))" id="q2"></div>
+ <div class="row mu" style="font-size:12px;margin:6px 0"><span class="ok">■ Asistencias</span><span class="ko">■ Faltas</span></div>
+ ${list.map(r=>{const t=r.p+r.a||1;return `<div class="row" style="margin-bottom:8px"><div style="width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e(r.s.nombre)}">${e(r.s.id)} · ${e(r.s.nombre)}</div>
+ <div class="bar"><i style="width:${r.p/t*100}%;background:var(--ok)"></i><i style="width:${r.a/t*100}%;background:var(--ko)"></i></div><div style="width:70px"><span class="ok">${r.p}</span> / <span class="ko">${r.a}</span></div></div>`}).join('')||'<p class="mu">Sin datos.</p>'}</div>`}
+
+function gruposV(){const g=cur();const opt=DIAS.map((d,i)=>`<option value="${i}">${d}</option>`).join('');
+ const sch=(p)=>`<select id="${p}d">${opt}</select><input type="time" id="${p}i" value="18:00"><input type="time" id="${p}f" value="20:00">`;
+ let h=`<div class="card"><h2>Nuevo grupo</h2><div class="row"><div><label>Grupo / carrera</label><input id="gc" placeholder="Ingeniería de Sistemas"></div><div><label>Jornada</label><input id="gj" placeholder="Nocturna 1"></div></div>
+ <label style="margin-top:10px">Horario (agrega cada día de clase)</label><div class="row">${sch('g')}<button onclick="addTmp()">+ Día</button></div>
+ <div class="mu" style="margin:6px 0">${S.tmp.map(h=>`${DIAS[h.dia]} ${h.ini}–${h.fin}`).join(' · ')}</div><button class="p" onclick="createGroup()">Crear grupo</button></div>`;
+ if(g)h+=`<div class="card"><div class="row sp"><h2>${e(g.carrera)} · ${e(g.jornada)}</h2><button class="d" onclick="delGroup()">Eliminar grupo</button></div>
+ <label>Horario</label>${g.horario.map((x,i)=>`<div class="row" style="margin-bottom:4px">${DIAS[x.dia]} ${x.ini}–${x.fin}<button class="d" onclick="delSched(${i})">✕</button></div>`).join('')}
+ <div class="row">${sch('h')}<button onclick="addSched()">+ Día</button></div>
+ <h2 style="margin-top:16px">Estudiantes (${g.students.length})</h2><div class="row"><input id="si" placeholder="Identificador"><input id="sn" placeholder="Nombre completo" style="flex:1"><button class="p" onclick="addStu()">Agregar</button></div>
+ <label style="margin-top:10px">O pega varios (una línea por estudiante: id, nombre)</label><textarea id="sb" rows="3" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--tx)"></textarea><button onclick="bulk()" style="margin-top:6px">Importar lista</button>
+ <div class="sc" style="margin-top:10px"><table>${g.students.map((s,i)=>`<tr><td>${e(s.id)}</td><td>${e(s.nombre)}</td><td><button class="d" onclick="delStu(${i})">✕</button></td></tr>`).join('')}</table></div></div>`;
+ return h}
+
+function render(){
+ if(!S.user){$('app').innerHTML=authV();return}
+ const T=[['asistencia','Asistencia'],['historico','Histórico'],['dashboard','Dashboard'],['grupos','Grupos']];
+ if(!cur()&&groups().length){S.gid=groups()[0].id;S.carrera=groups()[0].carrera}
+ const has=!!cur();if(!has)S.tab='grupos';
+ $('app').innerHTML=`<div class="row sp" style="margin-bottom:12px"><h1>Asistencia</h1><div class="row"><span class="mu" id="st">${e(st)}</span>${SY().token?'<button onclick="sync()">Sincronizar</button>':''}<span class="mu">${e(S.user)}</span><button onclick="logout()">Salir</button></div></div>
+ <div class="tabs">${T.map(([k,l])=>`<button class="${S.tab===k?'on':''}" onclick="S.tab='${k}';render()">${l}</button>`).join('')}</div>
+ ${has?selV():''}${S.tab==='asistencia'&&has?asisV():S.tab==='historico'&&has?histV():S.tab==='dashboard'&&has?dashV():gruposV()}`}
+setInterval(()=>sched(0),60000);addEventListener('online',()=>sched(0));
+render();
+</script></body></html>
