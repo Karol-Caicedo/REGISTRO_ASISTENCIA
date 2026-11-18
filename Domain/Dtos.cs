@@ -2,6 +2,8 @@ namespace Asistencia.Api.Domain;
 
 public record AuthReq(string Email, string Password);
 public record AuthRes(string Token, string Email);
+public record ForgotReq(string Email);
+public record ResetWithTokenReq(string Email, string Token, string NewPassword);
 public record HorarioDto(int Dia, string Inicio, string Fin);
 public record GrupoDto(Guid? Id, string Carrera, string Jornada, List<HorarioDto> Horarios);
 public record EstudianteDto(string Codigo, string NombreCompleto);

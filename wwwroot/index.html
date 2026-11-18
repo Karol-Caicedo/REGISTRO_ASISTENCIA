@@ -29,17 +29,23 @@ const Repo={
  save(db){try{localStorage.setItem('asist_v2',JSON.stringify(db))}catch(e){}}
 };
 let DB=Repo.load();let API='';try{API=localStorage.getItem('asist_api')||''}catch(e){}
+const EYE_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+const EYE_OFF_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
+const SUN_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>`;
+const MOON_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`;
 let currentTheme='light';try{currentTheme=localStorage.getItem('asist_theme')||'light'}catch(e){}
 function applyTheme(th){currentTheme=th;document.documentElement.setAttribute('data-theme',th);try{localStorage.setItem('asist_theme',th)}catch(e){}}
 function toggleTheme(){applyTheme(currentTheme==='dark'?'light':'dark');render()}
-const themeBtn=()=>currentTheme==='dark'?'☀️ Modo claro':'🌙 Modo oscuro';
+const themeBtn=()=>currentTheme==='dark'?`<span style="display:inline-flex;align-items:center;gap:6px">${SUN_ICON} Modo claro</span>`:`<span style="display:inline-flex;align-items:center;gap:6px">${MOON_ICON} Modo oscuro</span>`;
 applyTheme(currentTheme);
 const save=()=>{Repo.save(DB);if(S.user)sched()};
 const DIAS=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
 const MESES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 const today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toISOString().slice(0,10);
 const e=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const S={user:null,mode:'login',err:'',tab:'asistencia',carrera:'',gid:'',date:today(),month:today().slice(0,7),fdate:'',fst:'todos',q:'',tmp:[],editTmpIdx:-1,editSchedIdx:-1,newCarrera:'',newJornada:''};
+const qParams=new URLSearchParams(window.location.search);
+const initToken=qParams.get('token'), initEmail=qParams.get('email');
+const S={user:null,mode:(initToken&&initEmail)?'reset':'login',resetToken:initToken||'',resetEmail:initEmail||'',recEmail:'',recSent:false,recLink:'',err:'',tab:'asistencia',carrera:'',gid:'',date:today(),month:today().slice(0,7),fdate:'',fst:'todos',q:'',tmp:[],editTmpIdx:-1,editSchedIdx:-1,newCarrera:'',newJornada:''};
 const $=id=>document.getElementById(id);
 const groups=()=>DB.data[S.user].groups;
 const cur=()=>groups().find(g=>g.id===S.gid);
@@ -66,31 +72,65 @@ async function auth(){
  S.err='';S.gid=groups()[0]?.id||'';S.carrera=groups()[0]?.carrera||'';S.tab=groups().length?'asistencia':'grupos';render();sched(0);
 }
 function fail(m){S.err=m;render()}
-function togglePw(){
- const p=$('pw'), b=$('eye-btn');if(!p)return;
+function togglePw(id='pw', btnId='eye-btn'){
+ const p=$(id), b=$(btnId);if(!p)return;
  const isPw = p.type==='password';
  p.type = isPw ? 'text' : 'password';
- if(b){b.textContent = isPw ? '🙈' : '👁️'; b.title = isPw ? 'Ocultar contraseña' : 'Mostrar contraseña';}
+ if(b){b.innerHTML = isPw ? EYE_OFF_ICON : EYE_ICON; b.title = isPw ? 'Ocultar contraseña' : 'Mostrar contraseña';}
 }
-async function recoverPass(){
- const em=$('em').value.trim().toLowerCase(), pw=$('pw').value;
+async function sendRecoveryEmail(){
+ const em=($('em')?.value||'').trim().toLowerCase();
  if(!/^[a-z0-9._+-]+@gmail\.com$/.test(em))return fail('Usa un correo Gmail válido (@gmail.com).');
- if(!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/.test(pw))return fail('La nueva contraseña debe tener mínimo 8 caracteres con mayúsculas, minúsculas y números.');
- const lh=await hash(em,pw);
- const r=await api('POST','/api/auth/reset-password',{email:em,password:pw},'');
+ S.err='';
+ const tok = uid();
+ let link = window.location.origin + window.location.pathname + '?token=' + tok + '&email=' + encodeURIComponent(em);
+ const r = await api('POST','/api/auth/forgot-password',{email:em},'');
  if(r.net){
-  if(!DB.users[em])return fail('No existe una cuenta registrada con ese correo.');
-  DB.users[em]=lh;Repo.save(DB);
-  alert('Contraseña actualizada correctamente. Ya puedes iniciar sesión.');
-  S.mode='login';S.err='';render();return;
+  if(!DB.users[em])return fail('No se encontró una cuenta registrada con ese correo.');
+  DB.tokens = DB.tokens || {};
+  DB.tokens[tok] = { email: em, exp: Date.now() + 3600000 };
+  Repo.save(DB);
+ } else if(r.ok){
+  if(r.body?.link) link = r.body.link;
+ } else {
+  return fail(r.body?.error || 'No se pudo generar el enlace de recuperación.');
  }
- if(r.ok){
-  DB.users[em]=lh;Repo.save(DB);
-  alert('Contraseña actualizada correctamente. Ya puedes iniciar sesión.');
-  S.mode='login';S.err='';render();
- }else{
-  fail(r.body?.error||'No se pudo restablecer la contraseña.');
+ S.recEmail = em;
+ S.recLink = link;
+ S.recSent = true;
+ render();
+}
+function openResetLink(link){
+ window.location.href = link;
+}
+function cleanUrlAndLogin(){
+ try{ history.replaceState(null,'',window.location.pathname); }catch(e){}
+ S.mode='login';S.resetToken='';S.resetEmail='';S.recSent=false;S.err='';render();
+}
+async function submitNewPassword(){
+ const pw=($('pw')?.value||'');
+ if(!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/.test(pw))
+  return fail('La nueva contraseña debe tener mínimo 8 caracteres con mayúsculas, minúsculas y números.');
+ const em = S.resetEmail, tok = S.resetToken;
+ const r = await api('POST','/api/auth/reset-with-token',{email:em,token:tok,newPassword:pw},'');
+ const lh = await hash(em,pw);
+ if(r.net){
+  DB.tokens = DB.tokens || {};
+  const t = DB.tokens[tok];
+  if(!t || t.email !== em || t.exp < Date.now()){
+   return fail('El enlace de recuperación es inválido o ha expirado.');
+  }
+  DB.users[em] = lh;
+  delete DB.tokens[tok];
+  Repo.save(DB);
+ } else if(r.ok){
+  DB.users[em] = lh;
+  Repo.save(DB);
+ } else {
+  return fail(r.body?.error || 'No se pudo restablecer la contraseña.');
  }
+ alert('¡Contraseña actualizada correctamente! Ya puedes iniciar sesión con tu nueva contraseña.');
+ cleanUrlAndLogin();
 }
 
 // ===== Sincronización (local primero; last-write-wins por fecha de actualización) =====
@@ -170,42 +210,69 @@ function delStu(i){if(confirm('¿Quitar estudiante?')){const g=cur(),s=g.student
 
 // ===== Vistas =====
 function authV(){
- const r=S.mode==='reg', rec=S.mode==='recover';
- const title = rec ? 'Recuperar contraseña' : 'Sistema de Asistencia';
- const btnTxt = rec ? 'Restablecer contraseña' : (r ? 'Registrarme' : 'Entrar');
- const submitAction = rec ? 'recoverPass()' : 'auth()';
+ if(S.mode==='forgot'){
+  return `<div style="min-height:calc(100vh - 28px);display:flex;align-items:center;justify-content:center">
+  <div class="card" style="width:100%;max-width:380px;margin:0">
+   <h1 style="font-size:18px;margin-bottom:12px">${S.recSent ? 'Confirmación enviada' : 'Recuperar contraseña'}</h1>
+   ${!S.recSent ? `
+    <p class="mu" style="font-size:13px;margin:0 0 12px">Ingresa tu correo Gmail para enviarte el enlace de recuperación:</p>
+    <label>Correo Gmail</label>
+    <input id="em" type="email" value="${e(S.recEmail||'')}" style="width:100%" onkeydown="if(event.key==='Enter')sendRecoveryEmail()"><br><br>
+    <div class="msg">${e(S.err)}</div>
+    <button class="p" style="width:100%" onclick="sendRecoveryEmail()">Enviar confirmación al correo</button>
+    <p style="text-align:center;margin-top:14px"><a href="#" onclick="S.mode='login';S.err='';render();return false">Volver a iniciar sesión</a></p>
+   ` : `
+    <div style="padding:10px 12px;background:var(--item-bg);border:1px solid var(--bd);border-radius:8px;margin-bottom:12px">
+     <p style="margin:0 0 8px;font-size:14px">Hemos enviado el enlace de confirmación a: <br><b>${e(S.recEmail)}</b></p>
+     <p style="margin:0;font-size:13px;color:var(--mu)">Haz clic en el enlace recibido en tu correo para acceder a la web y definir tu nueva contraseña:</p>
+    </div>
+    <button class="p" style="width:100%" onclick="openResetLink('${e(S.recLink)}')">🔗 Abrir enlace del correo</button>
+    <p style="text-align:center;margin-top:14px"><a href="#" onclick="S.mode='login';S.recSent=false;S.err='';render();return false">Volver a iniciar sesión</a></p>
+   `}
+  </div></div>`;
+ }
 
- return `<div style="min-height:calc(100vh - 28px);display:flex;align-items:center;justify-content:center"><div class="card" style="width:100%;max-width:380px;margin:0">
- <div class="row sp" style="margin-bottom:12px">
-   <h1 style="font-size:18px">${title}</h1>
-   <button type="button" onclick="toggleTheme()" title="Cambiar tema" style="padding:4px 8px;font-size:12px">${themeBtn()}</button>
- </div>
+ if(S.mode==='reset'){
+  return `<div style="min-height:calc(100vh - 28px);display:flex;align-items:center;justify-content:center">
+  <div class="card" style="width:100%;max-width:380px;margin:0">
+   <h1 style="font-size:18px;margin-bottom:10px">Nueva contraseña</h1>
+   <p class="mu" style="font-size:13px;margin:0 0 12px">Escribe la nueva contraseña para <b>${e(S.resetEmail)}</b>:</p>
+   <label>Nueva contraseña</label>
+   <div style="position:relative;width:100%">
+     <input id="pw" type="password" style="width:100%;padding-right:42px" onkeydown="if(event.key==='Enter')submitNewPassword()">
+     <button id="eye-btn" type="button" onclick="togglePw()" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);background:transparent;border:none;cursor:pointer;padding:6px 8px;color:var(--mu);box-shadow:none" title="Mostrar contraseña">${EYE_ICON}</button>
+   </div>
+   <div class="mu" style="font-size:12px;margin-top:4px">Mínimo 8 caracteres con mayúsculas, minúsculas y números.</div>
+   <div class="msg">${e(S.err)}</div>
+   <button class="p" style="width:100%;margin-top:8px" onclick="submitNewPassword()">Guardar nueva contraseña</button>
+   <p style="text-align:center;margin-top:14px"><a href="#" onclick="cleanUrlAndLogin();return false">Volver a iniciar sesión</a></p>
+  </div></div>`;
+ }
 
- <label>Correo Gmail</label>
- <input id="em" type="email" placeholder="docente@gmail.com" style="width:100%"><br><br>
+ const r=S.mode==='reg';
+ return `<div style="min-height:calc(100vh - 28px);display:flex;align-items:center;justify-content:center">
+ <div class="card" style="width:100%;max-width:380px;margin:0">
+  <h1 style="font-size:18px;margin-bottom:14px">${r ? 'Crear cuenta' : 'Sistema de Asistencia'}</h1>
 
- <label>${rec ? 'Nueva contraseña' : 'Contraseña'}</label>
- <div style="position:relative;width:100%">
-   <input id="pw" type="password" style="width:100%;padding-right:42px" onkeydown="if(event.key==='Enter')${submitAction}">
-   <button id="eye-btn" type="button" onclick="togglePw()" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);background:transparent;border:none;cursor:pointer;padding:6px 8px;font-size:16px;color:var(--mu);box-shadow:none" title="Mostrar contraseña">👁️</button>
- </div>
- ${(r||rec)?'<div class="mu" style="font-size:12px;margin-top:4px">Mínimo 8 caracteres con mayúsculas, minúsculas y números.</div>':''}
+  <label>Correo Gmail</label>
+  <input id="em" type="email" style="width:100%"><br><br>
 
- <div class="msg">${e(S.err)}</div>
- <button class="p" style="width:100%;margin-top:6px" onclick="${submitAction}">${btnTxt}</button>
+  <label>Contraseña</label>
+  <div style="position:relative;width:100%">
+    <input id="pw" type="password" style="width:100%;padding-right:42px" onkeydown="if(event.key==='Enter')auth()">
+    <button id="eye-btn" type="button" onclick="togglePw()" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);background:transparent;border:none;cursor:pointer;padding:6px 8px;color:var(--mu);box-shadow:none" title="Mostrar contraseña">${EYE_ICON}</button>
+  </div>
+  ${r ? '<div class="mu" style="font-size:12px;margin-top:4px">Mínimo 8 caracteres con mayúsculas, minúsculas y números.</div>' : ''}
 
- ${!r && !rec ? '<p style="text-align:center;margin:10px 0 0"><a href="#" onclick="S.mode=\'recover\';S.err=\'\';render();return false" style="font-size:13px;color:var(--pr);text-decoration:none">¿Olvidaste tu contraseña?</a></p>' : ''}
+  <div class="msg">${e(S.err)}</div>
+  <button class="p" style="width:100%;margin-top:6px" onclick="auth()">${r ? 'Registrarme' : 'Entrar'}</button>
 
- <p style="text-align:center;margin-top:12px">
-   ${rec
-     ? '<a href="#" onclick="S.mode=\'login\';S.err=\'\';render();return false">Volver a iniciar sesión</a>'
-     : (r
-         ? '<a href="#" onclick="S.mode=\'login\';S.err=\'\';render();return false">Ya tengo cuenta</a>'
-         : '<a href="#" onclick="S.mode=\'reg\';S.err=\'\';render();return false">Crear cuenta nueva</a>'
-       )
-   }
- </p>
-</div></div>`;
+  ${!r ? '<p style="text-align:center;margin:10px 0 0"><a href="#" onclick="S.mode=\'forgot\';S.err=\'\';S.recSent=false;render();return false" style="font-size:13px;color:var(--pr);text-decoration:none">¿Olvidaste tu contraseña?</a></p>' : ''}
+
+  <p style="text-align:center;margin-top:12px">
+    <a href="#" onclick="S.mode='${r ? 'login' : 'reg'}';S.err='';render();return false">${r ? 'Ya tengo cuenta' : 'Crear cuenta nueva'}</a>
+  </p>
+ </div></div>`;
 }
 
 function selV(){const gs=groups(),cs=[...new Set(gs.map(g=>g.carrera))],js=gs.filter(g=>g.carrera===S.carrera);

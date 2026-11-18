@@ -84,6 +84,35 @@ app.MapPost("/api/auth/login", async (AuthReq r, AppDbContext db) =>
         ? Results.Json(new { error = "Correo o contraseña incorrectos." }, statusCode: 401)
         : Results.Ok(new AuthRes(Token(u), em));
 }).RequireRateLimiting("auth");
+var resetTokens = new System.Collections.Concurrent.ConcurrentDictionary<string, (string Email, DateTime Exp)>();
+
+app.MapPost("/api/auth/forgot-password", async (ForgotReq r, AppDbContext db, HttpContext ctx) =>
+{
+    var em = r.Email?.Trim().ToLowerInvariant() ?? "";
+    if (!Regex.IsMatch(em, @"^[a-z0-9._+-]+@gmail\.com$")) return Results.BadRequest(new { error = "Usa un correo Gmail válido." });
+    var u = await db.Docentes.FirstOrDefaultAsync(x => x.Email == em);
+    if (u is null) return Results.NotFound(new { error = "No se encontró una cuenta con ese correo." });
+    var tok = Guid.NewGuid().ToString("N");
+    resetTokens[tok] = (em, DateTime.UtcNow.AddHours(1));
+    var link = $"{ctx.Request.Scheme}://{ctx.Request.Host}/?token={tok}&email={Uri.EscapeDataString(em)}";
+    return Results.Ok(new { message = "Enlace de recuperación generado.", link });
+}).RequireRateLimiting("auth");
+
+app.MapPost("/api/auth/reset-with-token", async (ResetWithTokenReq r, AppDbContext db) =>
+{
+    var em = r.Email?.Trim().ToLowerInvariant() ?? "";
+    if (!resetTokens.TryGetValue(r.Token, out var entry) || entry.Email != em || entry.Exp < DateTime.UtcNow)
+        return Results.BadRequest(new { error = "El enlace de recuperación es inválido o ha expirado." });
+    if (!Regex.IsMatch(r.NewPassword, @"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$"))
+        return Results.BadRequest(new { error = "La nueva contraseña debe tener mínimo 8 caracteres con mayúsculas, minúsculas y números." });
+    var u = await db.Docentes.FirstOrDefaultAsync(x => x.Email == em);
+    if (u is null) return Results.NotFound(new { error = "Docente no encontrado." });
+    u.PasswordHash = BCrypt.Net.BCrypt.HashPassword(r.NewPassword);
+    await db.SaveChangesAsync();
+    resetTokens.TryRemove(r.Token, out _);
+    return Results.Ok(new { message = "Contraseña actualizada correctamente." });
+}).RequireRateLimiting("auth");
+
 app.MapPost("/api/auth/reset-password", async (AuthReq r, AppDbContext db) =>
 {
     var em = r.Email.Trim().ToLowerInvariant();
