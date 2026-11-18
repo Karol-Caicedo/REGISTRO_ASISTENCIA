@@ -181,12 +181,15 @@ function classDates(g,m){
  Object.keys(g.records).forEach(k=>k.startsWith(m)&&s.add(k));return[...s].sort()}
 const fmt=d=>{const[y,m,x]=d.split('-');return `${DIAS[new Date(y,m-1,x).getDay()].slice(0,3)} ${+x}`};
 const horTxt=g=>g.horario.length?g.horario.map(h=>`${DIAS[h.dia]} ${h.ini}–${h.fin}`).join(' · '):'Sin horario';
+function sortStudents(g){if(g&&Array.isArray(g.students))g.students.sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||'','es',{sensitivity:'base'}));}
 function stats(g,s){let p=0,a=0;for(const d in g.records){const v=g.records[d][s.id];if(v==='P')p++;else if(v==='A')a++}return{p,a}}
 
 // ===== Acciones =====
 function pick(k,v){S[k]=v;if(k==='carrera'){S.gid=groups().find(g=>g.carrera===v)?.id||''}S.fdate='';S.editSchedIdx=-1;render()}
-function mark(i,v){
- const g=cur(),s=g.students[i];
+function mark(idOrIdx,v){
+ const g=cur();if(!g)return;
+ const s=typeof idOrIdx==='string'?g.students.find(x=>x.id===idOrIdx):g.students[idOrIdx];
+ if(!s)return;
  g.records[S.date]=g.records[S.date]||{};
  g.ru=g.ru||{};
  if(g.records[S.date][s.id]===v){
@@ -200,25 +203,100 @@ function mark(i,v){
  save();render();
 }
 function syncNewInputs(){const gc=$('gc'),gj=$('gj');if(gc)S.newCarrera=gc.value;if(gj)S.newJornada=gj.value}
-function addTmp(){syncNewInputs();const d=$('gd').value,i=$('gi').value,f=$('gf').value;if(!i||!f)return alert('Selecciona hora de inicio y fin.');if(i>=f)return alert('La hora de inicio debe ser anterior a la hora de fin.');S.tmp.push({dia:d,ini:i,fin:f});render()}
+function checkSchedConflict(d, ini, fin, opts={}){
+ const diaNum = +d;
+ if(opts.checkTmp && S.tmp){
+  for(let idx=0; idx<S.tmp.length; idx++){
+   if(opts.ignoreTmpIdx!==undefined && opts.ignoreTmpIdx===idx) continue;
+   const h=S.tmp[idx];
+   if(+h.dia===diaNum && ini<h.fin && fin>h.ini){
+    return `Conflicto de horario: Ya agregaste una clase el ${DIAS[diaNum]} de ${h.ini} a ${h.fin} en este nuevo grupo. Registra otro horario.`;
+   }
+  }
+ }
+ const allGroups = groups();
+ for(const g of allGroups){
+  const isCur = opts.currentGroupId && g.id===opts.currentGroupId;
+  for(let idx=0; idx<g.horario.length; idx++){
+   if(isCur && opts.currentSchedIdx!==undefined && opts.currentSchedIdx===idx) continue;
+   const h=g.horario[idx];
+   if(+h.dia===diaNum && ini<h.fin && fin>h.ini){
+    const gName = `${g.carrera} · ${g.jornada}`;
+    if(isCur){
+     return `Conflicto de horario: Este grupo ya tiene una clase programada el ${DIAS[diaNum]} de ${h.ini} a ${h.fin}. Registra otro horario.`;
+    }else{
+     return `Conflicto de horario: Ya existe una clase en el grupo "${gName}" el ${DIAS[diaNum]} de ${h.ini} a ${h.fin}. Por favor registra otro horario.`;
+    }
+   }
+  }
+ }
+ return null;
+}
+function addTmp(){
+ syncNewInputs();
+ const d=$('gd').value,i=$('gi').value,f=$('gf').value;
+ if(!i||!f)return alert('Selecciona hora de inicio y fin.');
+ if(i>=f)return alert('La hora de inicio debe ser anterior a la hora de fin.');
+ const err = checkSchedConflict(d, i, f, {checkTmp: true});
+ if(err) return alert(err);
+ S.tmp.push({dia:d,ini:i,fin:f});
+ render();
+}
 function delTmp(i){syncNewInputs();S.tmp.splice(i,1);if(S.editTmpIdx===i)S.editTmpIdx=-1;else if(S.editTmpIdx>i)S.editTmpIdx--;render()}
 function startEditTmp(i){syncNewInputs();S.editTmpIdx=i;render()}
 function cancelEditTmp(){syncNewInputs();S.editTmpIdx=-1;render()}
-function saveEditTmp(i){syncNewInputs();const d=$('te_d').value,ini=$('te_i').value,fin=$('te_f').value;if(!ini||!fin)return alert('Selecciona hora de inicio y fin.');if(ini>=fin)return alert('La hora de inicio debe ser anterior a la hora de fin.');S.tmp[i]={dia:d,ini,fin};S.editTmpIdx=-1;render()}
+function saveEditTmp(i){
+ syncNewInputs();
+ const d=$('te_d').value,ini=$('te_i').value,fin=$('te_f').value;
+ if(!ini||!fin)return alert('Selecciona hora de inicio y fin.');
+ if(ini>=fin)return alert('La hora de inicio debe ser anterior a la hora de fin.');
+ const err = checkSchedConflict(d, ini, fin, {checkTmp: true, ignoreTmpIdx: i});
+ if(err) return alert(err);
+ S.tmp[i]={dia:d,ini,fin};
+ S.editTmpIdx=-1;
+ render();
+}
 function createGroup(){
  syncNewInputs();const c=S.newCarrera.trim(),j=S.newJornada.trim();if(!c||!j)return alert('Escribe la carrera/grupo y la jornada.');
+ for(const h of S.tmp){
+  const err = checkSchedConflict(h.dia, h.ini, h.fin);
+  if(err) return alert(err);
+ }
  const g={id:uid(),carrera:c,jornada:j,horario:S.tmp,students:[],records:{},ru:{},u:iso()};groups().push(g);S.tmp=[];S.newCarrera='';S.newJornada='';S.editTmpIdx=-1;S.carrera=c;S.gid=g.id;save();render()}
 function delGroup(){if(confirm('¿Eliminar este grupo y todo su histórico?')){const g0=cur();SY().tomb.push({t:'g',id:g0.id,carrera:g0.carrera,jornada:g0.jornada,u:iso()});DB.data[S.user].groups=groups().filter(g=>g.id!==S.gid);S.gid=groups()[0]?.id||'';S.carrera=groups()[0]?.carrera||'';save();render()}}
-function addSched(){const g=cur();if(!g)return;const d=$('hd').value,i=$('hi').value,f=$('hf').value;if(!i||!f)return alert('Selecciona hora de inicio y fin.');if(i>=f)return alert('La hora de inicio debe ser anterior a la hora de fin.');g.horario.push({dia:d,ini:i,fin:f});g.u=iso();save();render()}
+function addSched(){
+ const g=cur();if(!g)return;
+ const d=$('hd').value,i=$('hi').value,f=$('hf').value;
+ if(!i||!f)return alert('Selecciona hora de inicio y fin.');
+ if(i>=f)return alert('La hora de inicio debe ser anterior a la hora de fin.');
+ const err = checkSchedConflict(d, i, f, {currentGroupId: g.id});
+ if(err) return alert(err);
+ g.horario.push({dia:d,ini:i,fin:f});
+ g.u=iso();
+ save();
+ render();
+}
 function delSched(i){const g=cur();if(!g)return;if(!confirm('¿Eliminar este horario?'))return;g.horario.splice(i,1);if(S.editSchedIdx===i)S.editSchedIdx=-1;else if(S.editSchedIdx>i)S.editSchedIdx--;g.u=iso();save();render()}
 function startEditSched(i){S.editSchedIdx=i;render()}
 function cancelEditSched(){S.editSchedIdx=-1;render()}
-function saveEditSched(i){const g=cur();if(!g)return;const d=$('he_d').value,ini=$('he_i').value,fin=$('he_f').value;if(!ini||!fin)return alert('Selecciona hora de inicio y fin.');if(ini>=fin)return alert('La hora de inicio debe ser anterior a la hora de fin.');g.horario[i]={dia:d,ini,fin};g.u=iso();S.editSchedIdx=-1;save();render()}
+function saveEditSched(i){
+ const g=cur();if(!g)return;
+ const d=$('he_d').value,ini=$('he_i').value,fin=$('he_f').value;
+ if(!ini||!fin)return alert('Selecciona hora de inicio y fin.');
+ if(ini>=fin)return alert('La hora de inicio debe ser anterior a la hora de fin.');
+ const err = checkSchedConflict(d, ini, fin, {currentGroupId: g.id, currentSchedIdx: i});
+ if(err) return alert(err);
+ g.horario[i]={dia:d,ini,fin};
+ g.u=iso();
+ S.editSchedIdx=-1;
+ save();
+ render();
+}
 function addStu(){const g=cur(),id=$('si').value.trim(),n=$('sn').value.trim();if(!id||!n)return;
- if(g.students.some(s=>s.id===id))return alert('Ya existe un estudiante con ese identificador.');g.students.push({uid:uid(),id,nombre:n,u:iso()});save();render()}
+ if(g.students.some(s=>s.id===id))return alert('Ya existe un estudiante con ese identificador.');g.students.push({uid:uid(),id,nombre:n,u:iso()});sortStudents(g);save();render()}
 function bulk(){const g=cur();$('sb').value.split('\n').forEach(l=>{const[i,...n]=l.split(/[,;\t]/);const id=(i||'').trim(),nm=n.join(' ').trim();
- if(id&&nm&&!g.students.some(s=>s.id===id))g.students.push({uid:uid(),id,nombre:nm,u:iso()})});save();render()}
-function delStu(i){if(confirm('¿Quitar estudiante?')){const g=cur(),s=g.students[i];SY().tomb.push({t:'e',uid:s.uid,gid:g.id,id:s.id,nombre:s.nombre,u:iso()});g.students.splice(i,1);save();render()}}
+ if(id&&nm&&!g.students.some(s=>s.id===id))g.students.push({uid:uid(),id,nombre:nm,u:iso()})});sortStudents(g);save();render()}
+function delStu(idOrIdx){if(confirm('¿Quitar estudiante?')){const g=cur();if(!g)return;const idx=typeof idOrIdx==='string'?g.students.findIndex(x=>x.id===idOrIdx):idOrIdx;if(idx<0||idx>=g.students.length)return;const s=g.students[idx];SY().tomb.push({t:'e',uid:s.uid,gid:g.id,id:s.id,nombre:s.nombre,u:iso()});g.students.splice(idx,1);save();render()}}
 
 // ===== Vistas =====
 function authV(){
@@ -294,12 +372,12 @@ function selV(){const gs=groups(),cs=[...new Set(gs.map(g=>g.carrera))],js=gs.fi
 
 function asisV(){const g=cur();const isC=g.horario.some(h=>+h.dia===new Date(S.date+'T00:00').getDay());const rec=g.records[S.date]||{};
  const aq=(S.asisQ||'').toLowerCase().trim();
- const asisList=g.students.map((s,i)=>({s,i})).filter(({s})=>!aq||s.id.toLowerCase().includes(aq)||s.nombre.toLowerCase().includes(aq));
+ const asisList=g.students.filter(s=>!aq||s.id.toLowerCase().includes(aq)||s.nombre.toLowerCase().includes(aq));
  return `<div class="card"><div class="row sp"><h2>Tomar asistencia</h2>
  <div class="row"><input placeholder="Buscar por id o nombre" value="${e(S.asisQ||'')}" oninput="S.asisQ=this.value;render();const i=document.getElementById('aq');i&&(i.focus(),i.setSelectionRange(99,99))" id="aq" style="max-width:220px;padding:6px 10px;font-size:13px"><input type="date" value="${S.date}" onchange="S.date=this.value;render()"></div></div>
  ${isC?'':'<div class="msg" style="color:var(--mu)">Esta fecha no coincide con el horario del grupo (puedes registrarla igualmente).</div>'}
- ${g.students.length?`<div class="sc"><table><tr><th>Identificador</th><th>Nombre completo</th><th class="c">Asistencia</th></tr>${asisList.map(({s,i})=>`<tr><td>${e(s.id)}</td><td>${e(s.nombre)}</td><td class="c">
- <button class="pill ${rec[s.id]==='P'?'ok':''}" onclick="mark(${i},'P')">Asistió</button> <button class="pill ${rec[s.id]==='A'?'ko':''}" onclick="mark(${i},'A')">Faltó</button></td></tr>`).join('')}</table>${!asisList.length?`<p class="mu" style="margin:10px 0;font-size:13px">No se encontraron estudiantes para "${e(S.asisQ)}".</p>`:''}</div>`:'<p class="mu">Agrega estudiantes en la pestaña Grupos.</p>'}</div>`}
+ ${g.students.length?`<div class="sc"><table><tr><th>Identificador</th><th>Nombre completo</th><th class="c">Asistencia</th></tr>${asisList.map(s=>`<tr><td>${e(s.id)}</td><td>${e(s.nombre)}</td><td class="c">
+ <button class="pill ${rec[s.id]==='P'?'ok':''}" onclick="mark('${e(s.id)}','P')">Asistió</button> <button class="pill ${rec[s.id]==='A'?'ko':''}" onclick="mark('${e(s.id)}','A')">Faltó</button></td></tr>`).join('')}</table>${!asisList.length?`<p class="mu" style="margin:10px 0;font-size:13px">No se encontraron estudiantes para "${e(S.asisQ)}".</p>`:''}</div>`:'<p class="mu">Agrega estudiantes en la pestaña Grupos.</p>'}</div>`}
 
 function histV(){const g=cur(),ds=classDates(g,S.month),[y,m]=S.month.split('-'),f=S.fst;
  let body='';
@@ -327,7 +405,7 @@ function gruposV(){const g=cur();
  const sch=(p,d=0,i='18:00',f='20:00')=>`<select id="${p}d">${opt(d)}</select><input type="time" id="${p}i" value="${i}"><input type="time" id="${p}f" value="${f}">`;
 
  const tmpList = S.tmp.length === 0
-   ? '<p class="mu" style="margin:8px 0;font-size:13px">Sin días de clase agregados aún. Selecciona día y horas y pulsa "Agregar día".</p>'
+   ? ''
    : `<div style="margin:10px 0;display:flex;flex-direction:column;gap:6px">${S.tmp.map((h,i)=>{
        if(S.editTmpIdx===i){
          return `<div class="row" style="background:var(--item-bg);padding:8px 10px;border-radius:8px;border:1px solid var(--pr);gap:6px">
@@ -387,12 +465,13 @@ function gruposV(){const g=cur();
      <label style="margin:0;font-size:13px;font-weight:600">Listado de estudiantes (${listStudents.length}${sq?` de ${g.students.length}`:''})</label>
      <input placeholder="Buscar por id o nombre" value="${e(S.stuQ||'')}" oninput="S.stuQ=this.value;render();const i=document.getElementById('sq');i&&(i.focus(),i.setSelectionRange(99,99))" id="sq" style="max-width:240px;padding:6px 10px;font-size:13px">
    </div>
-   <div class="sc" style="margin-top:6px"><table>${listStudents.map(({s,idx})=>`<tr><td style="font-family:monospace;width:140px">${e(s.id)}</td><td>${e(s.nombre)}</td><td style="width:50px;text-align:right"><button class="d" onclick="delStu(${idx})" title="Quitar estudiante">✕</button></td></tr>`).join('')}</table>${!listStudents.length?`<p class="mu" style="margin:10px 0;font-size:13px">No se encontraron estudiantes para "${e(S.stuQ)}".</p>`:''}</div></div>`;
+   <div class="sc" style="margin-top:6px"><table>${listStudents.map(s=>`<tr><td style="font-family:monospace;width:140px">${e(s.id)}</td><td>${e(s.nombre)}</td><td style="width:50px;text-align:right"><button class="d" onclick="delStu(\'${e(s.id)}\')" title="Quitar estudiante">✕</button></td></tr>`).join('')}</table>${!listStudents.length?`<p class="mu" style="margin:10px 0;font-size:13px">No se encontraron estudiantes para "${e(S.stuQ)}".</p>`:''}</div></div>`;
  }
  return h}
 
 function render(){
  if(!S.user){$('app').innerHTML=authV();return}
+ if(groups())groups().forEach(g=>sortStudents(g));
  const T=[['grupos','Grupos'],['asistencia','Asistencia'],['historico','Histórico'],['dashboard','Dashboard']];
  if(!cur()&&groups().length){S.gid=groups()[0].id;S.carrera=groups()[0].carrera}
  const has=!!cur();if(!has)S.tab='grupos';
