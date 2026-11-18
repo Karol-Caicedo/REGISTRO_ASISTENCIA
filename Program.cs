@@ -84,6 +84,17 @@ app.MapPost("/api/auth/login", async (AuthReq r, AppDbContext db) =>
         ? Results.Json(new { error = "Correo o contraseña incorrectos." }, statusCode: 401)
         : Results.Ok(new AuthRes(Token(u), em));
 }).RequireRateLimiting("auth");
+app.MapPost("/api/auth/reset-password", async (AuthReq r, AppDbContext db) =>
+{
+    var em = r.Email.Trim().ToLowerInvariant();
+    if (!Regex.IsMatch(em, @"^[a-z0-9._+-]+@gmail\.com$")) return Results.BadRequest(new { error = "Usa un correo Gmail válido." });
+    if (!Regex.IsMatch(r.Password, @"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$")) return Results.BadRequest(new { error = "La nueva contraseña debe tener mínimo 8 caracteres con mayúsculas, minúsculas y números." });
+    var u = await db.Docentes.FirstOrDefaultAsync(x => x.Email == em);
+    if (u is null) return Results.NotFound(new { error = "No se encontró una cuenta con ese correo." });
+    u.PasswordHash = BCrypt.Net.BCrypt.HashPassword(r.Password);
+    await db.SaveChangesAsync();
+    return Results.Ok(new { message = "Contraseña actualizada correctamente." });
+}).RequireRateLimiting("auth");
 
 // ===== API protegida (cada docente solo ve lo suyo) =====
 var api = app.MapGroup("/api").RequireAuthorization();

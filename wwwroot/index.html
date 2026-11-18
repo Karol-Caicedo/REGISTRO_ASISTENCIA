@@ -3,13 +3,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Sistema de Asistencia</title>
 <style>
-:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#f4f7fa;--card:#FFFFFF;--tx:#1d2330;--mu:#5f6b7d;--bd:#dde3ea;--pr:#005B9B;--ok:#008000;--ko:#c8372d;--ac:#F2C500}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--bg:#10151c;--card:#19212b;--tx:#e8ebf3;--mu:#9aa6b8;--bd:#2a3442;--pr:#3d9be0;--ok:#3fbf3f;--ko:#ff7a72;--ac:#F2C500}}
-:root[data-theme="dark"]{color-scheme:dark;--bg:#10151c;--card:#19212b;--tx:#e8ebf3;--mu:#9aa6b8;--bd:#2a3442;--pr:#3d9be0;--ok:#3fbf3f;--ko:#ff7a72;--ac:#F2C500}
+:root{box-sizing:border-box;color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#ffffff;--card:#ffffff;--item-bg:#f8fafc;--tx:#1d2330;--mu:#5f6b7d;--bd:#dde3ea;--pr:#005B9B;--ok:#008000;--ko:#c8372d;--ac:#F2C500}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#10151c;--card:#19212b;--item-bg:#141a22;--tx:#e8ebf3;--mu:#9aa6b8;--bd:#2a3442;--pr:#3d9be0;--ok:#3fbf3f;--ko:#ff7a72;--ac:#F2C500}
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
 .w{max-width:960px;margin:0 auto;padding:14px}
-.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.03)}
 h1{font-size:20px;margin:0;color:var(--pr);border-left:6px solid var(--ac);padding-left:10px}h2{font-size:16px;margin:0 0 10px}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.sp{justify-content:space-between}
 label{font-size:12px;color:var(--mu);display:block;margin-bottom:3px}
@@ -30,12 +29,17 @@ const Repo={
  save(db){try{localStorage.setItem('asist_v2',JSON.stringify(db))}catch(e){}}
 };
 let DB=Repo.load();let API='';try{API=localStorage.getItem('asist_api')||''}catch(e){}
+let currentTheme='light';try{currentTheme=localStorage.getItem('asist_theme')||'light'}catch(e){}
+function applyTheme(th){currentTheme=th;document.documentElement.setAttribute('data-theme',th);try{localStorage.setItem('asist_theme',th)}catch(e){}}
+function toggleTheme(){applyTheme(currentTheme==='dark'?'light':'dark');render()}
+const themeBtn=()=>currentTheme==='dark'?'☀️ Modo claro':'🌙 Modo oscuro';
+applyTheme(currentTheme);
 const save=()=>{Repo.save(DB);if(S.user)sched()};
 const DIAS=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
 const MESES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 const today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toISOString().slice(0,10);
 const e=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const S={user:null,mode:'login',err:'',tab:'asistencia',carrera:'',gid:'',date:today(),month:today().slice(0,7),fdate:'',fst:'todos',q:'',tmp:[]};
+const S={user:null,mode:'login',err:'',tab:'asistencia',carrera:'',gid:'',date:today(),month:today().slice(0,7),fdate:'',fst:'todos',q:'',tmp:[],editTmpIdx:-1,editSchedIdx:-1,newCarrera:'',newJornada:''};
 const $=id=>document.getElementById(id);
 const groups=()=>DB.data[S.user].groups;
 const cur=()=>groups().find(g=>g.id===S.gid);
@@ -62,6 +66,32 @@ async function auth(){
  S.err='';S.gid=groups()[0]?.id||'';S.carrera=groups()[0]?.carrera||'';S.tab=groups().length?'asistencia':'grupos';render();sched(0);
 }
 function fail(m){S.err=m;render()}
+function togglePw(){
+ const p=$('pw'), b=$('eye-btn');if(!p)return;
+ const isPw = p.type==='password';
+ p.type = isPw ? 'text' : 'password';
+ if(b){b.textContent = isPw ? '🙈' : '👁️'; b.title = isPw ? 'Ocultar contraseña' : 'Mostrar contraseña';}
+}
+async function recoverPass(){
+ const em=$('em').value.trim().toLowerCase(), pw=$('pw').value;
+ if(!/^[a-z0-9._+-]+@gmail\.com$/.test(em))return fail('Usa un correo Gmail válido (@gmail.com).');
+ if(!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/.test(pw))return fail('La nueva contraseña debe tener mínimo 8 caracteres con mayúsculas, minúsculas y números.');
+ const lh=await hash(em,pw);
+ const r=await api('POST','/api/auth/reset-password',{email:em,password:pw},'');
+ if(r.net){
+  if(!DB.users[em])return fail('No existe una cuenta registrada con ese correo.');
+  DB.users[em]=lh;Repo.save(DB);
+  alert('Contraseña actualizada correctamente. Ya puedes iniciar sesión.');
+  S.mode='login';S.err='';render();return;
+ }
+ if(r.ok){
+  DB.users[em]=lh;Repo.save(DB);
+  alert('Contraseña actualizada correctamente. Ya puedes iniciar sesión.');
+  S.mode='login';S.err='';render();
+ }else{
+  fail(r.body?.error||'No se pudo restablecer la contraseña.');
+ }
+}
 
 // ===== Sincronización (local primero; last-write-wins por fecha de actualización) =====
 let st='',tm=null,busy=false,again=false;
@@ -114,16 +144,24 @@ const horTxt=g=>g.horario.length?g.horario.map(h=>`${DIAS[h.dia]} ${h.ini}–${h
 function stats(g,s){let p=0,a=0;for(const d in g.records){const v=g.records[d][s.id];if(v==='P')p++;else if(v==='A')a++}return{p,a}}
 
 // ===== Acciones =====
-function pick(k,v){S[k]=v;if(k==='carrera'){S.gid=groups().find(g=>g.carrera===v)?.id||''}S.fdate='';render()}
+function pick(k,v){S[k]=v;if(k==='carrera'){S.gid=groups().find(g=>g.carrera===v)?.id||''}S.fdate='';S.editSchedIdx=-1;render()}
 function mark(i,v){const g=cur(),s=g.students[i];(g.records[S.date]=g.records[S.date]||{})[s.id]=v;(g.ru=g.ru||{})[S.date+'|'+s.id]=iso();save();render()}
 function markAll(v){const g=cur();g.records[S.date]=g.records[S.date]||{};g.ru=g.ru||{};g.students.forEach(s=>{g.records[S.date][s.id]=v;g.ru[S.date+'|'+s.id]=iso()});save();render()}
-function addTmp(){S.tmp.push({dia:$('gd').value,ini:$('gi').value,fin:$('gf').value});render()}
+function syncNewInputs(){const gc=$('gc'),gj=$('gj');if(gc)S.newCarrera=gc.value;if(gj)S.newJornada=gj.value}
+function addTmp(){syncNewInputs();const d=$('gd').value,i=$('gi').value,f=$('gf').value;if(!i||!f)return alert('Selecciona hora de inicio y fin.');if(i>=f)return alert('La hora de inicio debe ser anterior a la hora de fin.');S.tmp.push({dia:d,ini:i,fin:f});render()}
+function delTmp(i){syncNewInputs();S.tmp.splice(i,1);if(S.editTmpIdx===i)S.editTmpIdx=-1;else if(S.editTmpIdx>i)S.editTmpIdx--;render()}
+function startEditTmp(i){syncNewInputs();S.editTmpIdx=i;render()}
+function cancelEditTmp(){syncNewInputs();S.editTmpIdx=-1;render()}
+function saveEditTmp(i){syncNewInputs();const d=$('te_d').value,ini=$('te_i').value,fin=$('te_f').value;if(!ini||!fin)return alert('Selecciona hora de inicio y fin.');if(ini>=fin)return alert('La hora de inicio debe ser anterior a la hora de fin.');S.tmp[i]={dia:d,ini,fin};S.editTmpIdx=-1;render()}
 function createGroup(){
- const c=$('gc').value.trim(),j=$('gj').value.trim();if(!c||!j)return alert('Escribe la carrera/grupo y la jornada.');
- const g={id:uid(),carrera:c,jornada:j,horario:S.tmp,students:[],records:{},ru:{},u:iso()};groups().push(g);S.tmp=[];S.carrera=c;S.gid=g.id;save();render()}
+ syncNewInputs();const c=S.newCarrera.trim(),j=S.newJornada.trim();if(!c||!j)return alert('Escribe la carrera/grupo y la jornada.');
+ const g={id:uid(),carrera:c,jornada:j,horario:S.tmp,students:[],records:{},ru:{},u:iso()};groups().push(g);S.tmp=[];S.newCarrera='';S.newJornada='';S.editTmpIdx=-1;S.carrera=c;S.gid=g.id;save();render()}
 function delGroup(){if(confirm('¿Eliminar este grupo y todo su histórico?')){const g0=cur();SY().tomb.push({t:'g',id:g0.id,carrera:g0.carrera,jornada:g0.jornada,u:iso()});DB.data[S.user].groups=groups().filter(g=>g.id!==S.gid);S.gid=groups()[0]?.id||'';S.carrera=groups()[0]?.carrera||'';save();render()}}
-function addSched(){const g=cur();g.horario.push({dia:$('hd').value,ini:$('hi').value,fin:$('hf').value});g.u=iso();save();render()}
-function delSched(i){const g=cur();g.horario.splice(i,1);g.u=iso();save();render()}
+function addSched(){const g=cur();if(!g)return;const d=$('hd').value,i=$('hi').value,f=$('hf').value;if(!i||!f)return alert('Selecciona hora de inicio y fin.');if(i>=f)return alert('La hora de inicio debe ser anterior a la hora de fin.');g.horario.push({dia:d,ini:i,fin:f});g.u=iso();save();render()}
+function delSched(i){const g=cur();if(!g)return;if(!confirm('¿Eliminar este horario?'))return;g.horario.splice(i,1);if(S.editSchedIdx===i)S.editSchedIdx=-1;else if(S.editSchedIdx>i)S.editSchedIdx--;g.u=iso();save();render()}
+function startEditSched(i){S.editSchedIdx=i;render()}
+function cancelEditSched(){S.editSchedIdx=-1;render()}
+function saveEditSched(i){const g=cur();if(!g)return;const d=$('he_d').value,ini=$('he_i').value,fin=$('he_f').value;if(!ini||!fin)return alert('Selecciona hora de inicio y fin.');if(ini>=fin)return alert('La hora de inicio debe ser anterior a la hora de fin.');g.horario[i]={dia:d,ini,fin};g.u=iso();S.editSchedIdx=-1;save();render()}
 function addStu(){const g=cur(),id=$('si').value.trim(),n=$('sn').value.trim();if(!id||!n)return;
  if(g.students.some(s=>s.id===id))return alert('Ya existe un estudiante con ese identificador.');g.students.push({uid:uid(),id,nombre:n,u:iso()});save();render()}
 function bulk(){const g=cur();$('sb').value.split('\n').forEach(l=>{const[i,...n]=l.split(/[,;\t]/);const id=(i||'').trim(),nm=n.join(' ').trim();
@@ -131,12 +169,44 @@ function bulk(){const g=cur();$('sb').value.split('\n').forEach(l=>{const[i,...n
 function delStu(i){if(confirm('¿Quitar estudiante?')){const g=cur(),s=g.students[i];SY().tomb.push({t:'e',uid:s.uid,gid:g.id,id:s.id,nombre:s.nombre,u:iso()});g.students.splice(i,1);save();render()}}
 
 // ===== Vistas =====
-function authV(){const r=S.mode==='reg';return `<div class="card" style="max-width:380px;margin:8vh auto"><h1>Sistema de Asistencia</h1><p class="mu">${r?'Crea tu cuenta de docente':'Inicia sesión'}</p>
-<label>Correo Gmail</label><input id="em" type="email" placeholder="docente@gmail.com" style="width:100%"><br><br>
-<label>Contraseña</label><input id="pw" type="password" style="width:100%" onkeydown="if(event.key==='Enter')auth()">
-${r?'<div class="mu" style="font-size:12px;margin-top:4px">Mínimo 8 caracteres con mayúsculas, minúsculas y números.</div>':''}
-<details style="margin-top:8px"><summary class="mu">Servidor (opcional)</summary><input id="sv" value="${e(API)}" placeholder="vacío = mismo servidor" style="width:100%"></details><div class="msg">${e(S.err)}</div><button class="p" style="width:100%" onclick="auth()">${r?'Registrarme':'Entrar'}</button>
-<p style="text-align:center"><a href="#" onclick="S.mode='${r?'login':'reg'}';S.err='';render();return false">${r?'Ya tengo cuenta':'Crear cuenta nueva'}</a></p></div>`}
+function authV(){
+ const r=S.mode==='reg', rec=S.mode==='recover';
+ const title = rec ? 'Recuperar contraseña' : 'Sistema de Asistencia';
+ const btnTxt = rec ? 'Restablecer contraseña' : (r ? 'Registrarme' : 'Entrar');
+ const submitAction = rec ? 'recoverPass()' : 'auth()';
+
+ return `<div style="min-height:calc(100vh - 28px);display:flex;align-items:center;justify-content:center"><div class="card" style="width:100%;max-width:380px;margin:0">
+ <div class="row sp" style="margin-bottom:12px">
+   <h1 style="font-size:18px">${title}</h1>
+   <button type="button" onclick="toggleTheme()" title="Cambiar tema" style="padding:4px 8px;font-size:12px">${themeBtn()}</button>
+ </div>
+
+ <label>Correo Gmail</label>
+ <input id="em" type="email" placeholder="docente@gmail.com" style="width:100%"><br><br>
+
+ <label>${rec ? 'Nueva contraseña' : 'Contraseña'}</label>
+ <div style="position:relative;width:100%">
+   <input id="pw" type="password" style="width:100%;padding-right:42px" onkeydown="if(event.key==='Enter')${submitAction}">
+   <button id="eye-btn" type="button" onclick="togglePw()" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);background:transparent;border:none;cursor:pointer;padding:6px 8px;font-size:16px;color:var(--mu);box-shadow:none" title="Mostrar contraseña">👁️</button>
+ </div>
+ ${(r||rec)?'<div class="mu" style="font-size:12px;margin-top:4px">Mínimo 8 caracteres con mayúsculas, minúsculas y números.</div>':''}
+
+ <div class="msg">${e(S.err)}</div>
+ <button class="p" style="width:100%;margin-top:6px" onclick="${submitAction}">${btnTxt}</button>
+
+ ${!r && !rec ? '<p style="text-align:center;margin:10px 0 0"><a href="#" onclick="S.mode=\'recover\';S.err=\'\';render();return false" style="font-size:13px;color:var(--pr);text-decoration:none">¿Olvidaste tu contraseña?</a></p>' : ''}
+
+ <p style="text-align:center;margin-top:12px">
+   ${rec
+     ? '<a href="#" onclick="S.mode=\'login\';S.err=\'\';render();return false">Volver a iniciar sesión</a>'
+     : (r
+         ? '<a href="#" onclick="S.mode=\'login\';S.err=\'\';render();return false">Ya tengo cuenta</a>'
+         : '<a href="#" onclick="S.mode=\'reg\';S.err=\'\';render();return false">Crear cuenta nueva</a>'
+       )
+   }
+ </p>
+</div></div>`;
+}
 
 function selV(){const gs=groups(),cs=[...new Set(gs.map(g=>g.carrera))],js=gs.filter(g=>g.carrera===S.carrera);
  return `<div class="card row"><div><label>Grupo</label><select onchange="pick('carrera',this.value)">${cs.map(c=>`<option ${c===S.carrera?'selected':''}>${e(c)}</option>`).join('')}</select></div>
@@ -172,17 +242,65 @@ function dashV(){const g=cur(),q=S.q.toLowerCase(),ses=Object.keys(g.records).le
  ${list.map(r=>{const t=r.p+r.a||1;return `<div class="row" style="margin-bottom:8px"><div style="width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e(r.s.nombre)}">${e(r.s.id)} · ${e(r.s.nombre)}</div>
  <div class="bar"><i style="width:${r.p/t*100}%;background:var(--ok)"></i><i style="width:${r.a/t*100}%;background:var(--ko)"></i></div><div style="width:70px"><span class="ok">${r.p}</span> / <span class="ko">${r.a}</span></div></div>`}).join('')||'<p class="mu">Sin datos.</p>'}</div>`}
 
-function gruposV(){const g=cur();const opt=DIAS.map((d,i)=>`<option value="${i}">${d}</option>`).join('');
- const sch=(p)=>`<select id="${p}d">${opt}</select><input type="time" id="${p}i" value="18:00"><input type="time" id="${p}f" value="20:00">`;
- let h=`<div class="card"><h2>Nuevo grupo</h2><div class="row"><div><label>Grupo / carrera</label><input id="gc" placeholder="Ingeniería de Sistemas"></div><div><label>Jornada</label><input id="gj" placeholder="Nocturna 1"></div></div>
- <label style="margin-top:10px">Horario (agrega cada día de clase)</label><div class="row">${sch('g')}<button onclick="addTmp()">+ Día</button></div>
- <div class="mu" style="margin:6px 0">${S.tmp.map(h=>`${DIAS[h.dia]} ${h.ini}–${h.fin}`).join(' · ')}</div><button class="p" onclick="createGroup()">Crear grupo</button></div>`;
- if(g)h+=`<div class="card"><div class="row sp"><h2>${e(g.carrera)} · ${e(g.jornada)}</h2><button class="d" onclick="delGroup()">Eliminar grupo</button></div>
- <label>Horario</label>${g.horario.map((x,i)=>`<div class="row" style="margin-bottom:4px">${DIAS[x.dia]} ${x.ini}–${x.fin}<button class="d" onclick="delSched(${i})">✕</button></div>`).join('')}
- <div class="row">${sch('h')}<button onclick="addSched()">+ Día</button></div>
- <h2 style="margin-top:16px">Estudiantes (${g.students.length})</h2><div class="row"><input id="si" placeholder="Identificador"><input id="sn" placeholder="Nombre completo" style="flex:1"><button class="p" onclick="addStu()">Agregar</button></div>
- <label style="margin-top:10px">O pega varios (una línea por estudiante: id, nombre)</label><textarea id="sb" rows="3" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--tx)"></textarea><button onclick="bulk()" style="margin-top:6px">Importar lista</button>
- <div class="sc" style="margin-top:10px"><table>${g.students.map((s,i)=>`<tr><td>${e(s.id)}</td><td>${e(s.nombre)}</td><td><button class="d" onclick="delStu(${i})">✕</button></td></tr>`).join('')}</table></div></div>`;
+function gruposV(){const g=cur();
+ const opt=(sel=0)=>DIAS.map((d,i)=>`<option value="${i}" ${+sel===i?'selected':''}>${d}</option>`).join('');
+ const sch=(p,d=0,i='18:00',f='20:00')=>`<select id="${p}d">${opt(d)}</select><input type="time" id="${p}i" value="${i}"><input type="time" id="${p}f" value="${f}">`;
+
+ const tmpList = S.tmp.length === 0
+   ? '<p class="mu" style="margin:8px 0;font-size:13px">Sin días de clase agregados aún. Selecciona día y horas y pulsa "Agregar día".</p>'
+   : `<div style="margin:10px 0;display:flex;flex-direction:column;gap:6px">${S.tmp.map((h,i)=>{
+       if(S.editTmpIdx===i){
+         return `<div class="row" style="background:var(--item-bg);padding:8px 10px;border-radius:8px;border:1px solid var(--pr);gap:6px">
+           <select id="te_d">${opt(h.dia)}</select>
+           <input type="time" id="te_i" value="${h.ini}">
+           <input type="time" id="te_f" value="${h.fin}">
+           <button class="p" type="button" onclick="saveEditTmp(${i})">Guardar</button>
+           <button type="button" onclick="cancelEditTmp()">Cancelar</button>
+         </div>`;
+       }
+       return `<div class="row sp" style="background:var(--item-bg);padding:8px 12px;border-radius:8px;border:1px solid var(--bd)">
+         <div><b>${DIAS[h.dia]}</b> <span class="mu" style="margin-left:8px">${h.ini}–${h.fin}</span></div>
+         <div class="row" style="gap:6px">
+           <button type="button" onclick="startEditTmp(${i})">Editar</button>
+           <button type="button" class="d" onclick="delTmp(${i})">Eliminar</button>
+         </div>
+       </div>`;
+     }).join('')}</div>`;
+
+ let h=`<div class="card"><h2>Nuevo grupo</h2><div class="row"><div><label>Grupo / carrera</label><input id="gc" placeholder="Ingeniería de Sistemas" value="${e(S.newCarrera||'')}" oninput="S.newCarrera=this.value"></div><div><label>Jornada</label><input id="gj" placeholder="Nocturna 1" value="${e(S.newJornada||'')}" oninput="S.newJornada=this.value"></div></div>
+ <label style="margin-top:12px">Horario (agrega cada día de clase)</label><div class="row">${sch('g')}<button type="button" onclick="addTmp()">Agregar día</button></div>
+ ${tmpList}<button class="p" style="margin-top:8px" onclick="createGroup()">Crear grupo</button></div>`;
+
+ if(g){
+   const gList = g.horario.length === 0
+     ? '<p class="mu" style="margin:8px 0;font-size:13px">Sin horarios asignados.</p>'
+     : `<div style="margin:8px 0;display:flex;flex-direction:column;gap:6px">${g.horario.map((x,i)=>{
+         if(S.editSchedIdx===i){
+           return `<div class="row" style="background:var(--item-bg);padding:8px 10px;border-radius:8px;border:1px solid var(--pr);gap:6px">
+             <select id="he_d">${opt(x.dia)}</select>
+             <input type="time" id="he_i" value="${x.ini}">
+             <input type="time" id="he_f" value="${x.fin}">
+             <button class="p" type="button" onclick="saveEditSched(${i})">Guardar</button>
+             <button type="button" onclick="cancelEditSched()">Cancelar</button>
+           </div>`;
+         }
+         return `<div class="row sp" style="background:var(--item-bg);padding:8px 12px;border-radius:8px;border:1px solid var(--bd)">
+           <div><b>${DIAS[x.dia]}</b> <span class="mu" style="margin-left:8px">${x.ini}–${x.fin}</span></div>
+           <div class="row" style="gap:6px">
+             <button type="button" onclick="startEditSched(${i})">Editar</button>
+             <button type="button" class="d" onclick="delSched(${i})">Eliminar</button>
+           </div>
+         </div>`;
+       }).join('')}</div>`;
+
+   h+=`<div class="card"><div class="row sp"><h2>${e(g.carrera)} · ${e(g.jornada)}</h2><button class="d" onclick="delGroup()">Eliminar grupo</button></div>
+   <label>Horario</label>
+   ${gList}
+   <div class="row" style="margin-top:8px">${sch('h')}<button type="button" onclick="addSched()">Agregar día</button></div>
+   <h2 style="margin-top:16px">Estudiantes (${g.students.length})</h2><div class="row"><input id="si" placeholder="Identificador"><input id="sn" placeholder="Nombre completo" style="flex:1"><button class="p" onclick="addStu()">Agregar</button></div>
+   <label style="margin-top:10px">O pega varios (una línea por estudiante: id, nombre)</label><textarea id="sb" rows="3" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--tx)"></textarea><button onclick="bulk()" style="margin-top:6px">Importar lista</button>
+   <div class="sc" style="margin-top:10px"><table>${g.students.map((s,i)=>`<tr><td>${e(s.id)}</td><td>${e(s.nombre)}</td><td><button class="d" onclick="delStu(${i})">✕</button></td></tr>`).join('')}</table></div></div>`;
+ }
  return h}
 
 function render(){
@@ -190,7 +308,7 @@ function render(){
  const T=[['asistencia','Asistencia'],['historico','Histórico'],['dashboard','Dashboard'],['grupos','Grupos']];
  if(!cur()&&groups().length){S.gid=groups()[0].id;S.carrera=groups()[0].carrera}
  const has=!!cur();if(!has)S.tab='grupos';
- $('app').innerHTML=`<div class="row sp" style="margin-bottom:12px"><h1>Asistencia</h1><div class="row"><span class="mu" id="st">${e(st)}</span>${SY().token?'<button onclick="sync()">Sincronizar</button>':''}<span class="mu">${e(S.user)}</span><button onclick="logout()">Salir</button></div></div>
+ $('app').innerHTML=`<div class="row sp" style="margin-bottom:12px"><h1>Asistencia</h1><div class="row"><button type="button" onclick="toggleTheme()" title="Cambiar tema">${themeBtn()}</button><span class="mu" id="st">${e(st)}</span>${SY().token?'<button onclick="sync()">Sincronizar</button>':''}<span class="mu">${e(S.user)}</span><button onclick="logout()">Salir</button></div></div>
  <div class="tabs">${T.map(([k,l])=>`<button class="${S.tab===k?'on':''}" onclick="S.tab='${k}';render()">${l}</button>`).join('')}</div>
  ${has?selV():''}${S.tab==='asistencia'&&has?asisV():S.tab==='historico'&&has?histV():S.tab==='dashboard'&&has?dashV():gruposV()}`}
 setInterval(()=>sched(0),60000);addEventListener('online',()=>sched(0));
