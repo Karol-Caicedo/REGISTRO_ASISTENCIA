@@ -45,7 +45,7 @@ const today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toISOStr
 const e=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const qParams=new URLSearchParams(window.location.search);
 const initToken=qParams.get('token'), initEmail=qParams.get('email');
-const S={user:null,mode:(initToken&&initEmail)?'reset':'login',resetToken:initToken||'',resetEmail:initEmail||'',recEmail:'',recSent:false,recLink:'',err:'',tab:'grupos',carrera:'',gid:'',date:today(),month:today().slice(0,7),fdate:'',fst:'todos',q:'',stuQ:'',asisQ:'',tmp:[],editTmpIdx:-1,editSchedIdx:-1,newCarrera:'',newJornada:''};
+const S={user:null,mode:(initToken&&initEmail)?'reset':'login',resetToken:initToken||'',resetEmail:initEmail||'',recEmail:'',recSent:false,recLink:'',err:'',tab:'grupos',carrera:'',gid:'',date:today(),month:today().slice(0,7),fdate:'',fst:'todos',q:'',stuQ:'',asisQ:'',calOpen:false,calMonth:'',tmp:[],editTmpIdx:-1,editSchedIdx:-1,newCarrera:'',newJornada:''};
 const $=id=>document.getElementById(id);
 const groups=()=>DB.data[S.user].groups;
 const cur=()=>groups().find(g=>g.id===S.gid);
@@ -185,7 +185,7 @@ function sortStudents(g){if(g&&Array.isArray(g.students))g.students.sort((a,b)=>
 function stats(g,s){let p=0,a=0;for(const d in g.records){const v=g.records[d][s.id];if(v==='P')p++;else if(v==='A')a++}return{p,a}}
 
 // ===== Acciones =====
-function pick(k,v){S[k]=v;if(k==='carrera'){S.gid=groups().find(g=>g.carrera===v)?.id||''}S.fdate='';S.editSchedIdx=-1;render()}
+function pick(k,v){S[k]=v;if(k==='carrera'){S.gid=groups().find(g=>g.carrera===v)?.id||''}S.fdate='';S.calOpen=false;S.editSchedIdx=-1;render()}
 function mark(idOrIdx,v){
  const g=cur();if(!g)return;
  const s=typeof idOrIdx==='string'?g.students.find(x=>x.id===idOrIdx):g.students[idOrIdx];
@@ -367,17 +367,157 @@ function authV(){
 
 function selV(){const gs=groups(),cs=[...new Set(gs.map(g=>g.carrera))],js=gs.filter(g=>g.carrera===S.carrera);
  return `<div class="card row"><div><label>Grupo</label><select onchange="pick('carrera',this.value)">${cs.map(c=>`<option ${c===S.carrera?'selected':''}>${e(c)}</option>`).join('')}</select></div>
- <div><label>Jornada</label><select onchange="S.gid=this.value;S.fdate='';render()">${js.map(g=>`<option value="${g.id}" ${g.id===S.gid?'selected':''}>${e(g.jornada)}</option>`).join('')}</select></div>
+ <div><label>Jornada</label><select onchange="S.gid=this.value;S.fdate='';S.calOpen=false;render()">${js.map(g=>`<option value="${g.id}" ${g.id===S.gid?'selected':''}>${e(g.jornada)}</option>`).join('')}</select></div>
  <div class="mu" style="flex:1;min-width:160px">${cur()?e(horTxt(cur())):''}</div></div>`}
 
-function asisV(){const g=cur();const isC=g.horario.some(h=>+h.dia===new Date(S.date+'T00:00').getDay());const rec=g.records[S.date]||{};
- const aq=(S.asisQ||'').toLowerCase().trim();
- const asisList=g.students.filter(s=>!aq||s.id.toLowerCase().includes(aq)||s.nombre.toLowerCase().includes(aq));
- return `<div class="card"><div class="row sp"><h2>Tomar asistencia</h2>
- <div class="row"><input placeholder="Buscar por id o nombre" value="${e(S.asisQ||'')}" oninput="S.asisQ=this.value;render();const i=document.getElementById('aq');i&&(i.focus(),i.setSelectionRange(99,99))" id="aq" style="max-width:220px;padding:6px 10px;font-size:13px"><input type="date" value="${S.date}" onchange="S.date=this.value;render()"></div></div>
- ${isC?'':'<div class="msg" style="color:var(--mu)">Esta fecha no coincide con el horario del grupo (puedes registrarla igualmente).</div>'}
- ${g.students.length?`<div class="sc"><table><tr><th>Identificador</th><th>Nombre completo</th><th class="c">Asistencia</th></tr>${asisList.map(s=>`<tr><td>${e(s.id)}</td><td>${e(s.nombre)}</td><td class="c">
- <button class="pill ${rec[s.id]==='P'?'ok':''}" onclick="mark('${e(s.id)}','P')">Asistió</button> <button class="pill ${rec[s.id]==='A'?'ko':''}" onclick="mark('${e(s.id)}','A')">Faltó</button></td></tr>`).join('')}</table>${!asisList.length?`<p class="mu" style="margin:10px 0;font-size:13px">No se encontraron estudiantes para "${e(S.asisQ)}".</p>`:''}</div>`:'<p class="mu">Agrega estudiantes en la pestaña Grupos.</p>'}</div>`}
+
+function getNearestClassDate(g, refDateStr = today()){
+ if(!g || !g.horario || !g.horario.length) return refDateStr;
+ const daysSet = new Set(g.horario.map(h => +h.dia));
+ const curD = new Date(refDateStr + 'T00:00');
+ for(let i = 0; i < 7; i++){
+  const d = new Date(curD);
+  d.setDate(d.getDate() - i);
+  if(daysSet.has(d.getDay())){
+   return d.toISOString().slice(0, 10);
+  }
+ }
+ for(let i = 1; i <= 7; i++){
+  const d = new Date(curD);
+  d.setDate(d.getDate() + i);
+  if(daysSet.has(d.getDay())){
+   return d.toISOString().slice(0, 10);
+  }
+ }
+ return refDateStr;
+}
+
+function ensureValidClassDate(g){
+ if(!g || !g.horario || !g.horario.length) return;
+ const daysSet = new Set(g.horario.map(h => +h.dia));
+ const curD = new Date(S.date + 'T00:00');
+ if(!daysSet.has(curD.getDay())){
+  S.date = getNearestClassDate(g, today());
+  S.calMonth = S.date.slice(0, 7);
+ }
+}
+
+function stepClassDate(dir){
+ const g = cur();
+ if(!g || !g.horario || !g.horario.length) return;
+ const daysSet = new Set(g.horario.map(h => +h.dia));
+ let d = new Date(S.date + 'T00:00');
+ for(let i = 0; i < 60; i++){
+  d.setDate(d.getDate() + dir);
+  if(daysSet.has(d.getDay())){
+   S.date = d.toISOString().slice(0, 10);
+   S.calMonth = S.date.slice(0, 7);
+   render();
+   return;
+  }
+ }
+}
+
+function pickClassDate(dStr){
+ S.date = dStr;
+ S.calMonth = dStr.slice(0, 7);
+ S.calOpen = false;
+ render();
+}
+
+function changeCalMonth(delta){
+ if(!S.calMonth) S.calMonth = S.date.slice(0, 7);
+ const [y, m] = S.calMonth.split('-').map(Number);
+ const d = new Date(y, m - 1 + delta, 1);
+ S.calMonth = d.toISOString().slice(0, 7);
+ render();
+}
+
+function calV(g){
+ if(!S.calOpen) return '';
+ if(!S.calMonth) S.calMonth = S.date.slice(0, 7);
+ const [y, m] = S.calMonth.split('-').map(Number);
+ const firstDay = new Date(y, m - 1, 1).getDay();
+ const daysInMonth = new Date(y, m, 0).getDate();
+ const daysSet = new Set(g.horario.map(h => +h.dia));
+ const D_HEADERS = ['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sa'];
+ const cells = [];
+ for(let i = 0; i < firstDay; i++){
+  cells.push('<div style="height:32px"></div>');
+ }
+ for(let d = 1; d <= daysInMonth; d++){
+  const dStr = y + '-' + String(m).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+  const dayOfWeek = (firstDay + d - 1) % 7;
+  const isClass = daysSet.has(dayOfWeek);
+  const isSel = dStr === S.date;
+  const rec = g.records && g.records[dStr];
+  const hasTaken = rec && Object.keys(rec).length > 0;
+  if(isClass){
+   let bg = isSel ? 'var(--pr)' : hasTaken ? 'rgba(0,128,0,0.12)' : 'var(--item-bg)';
+   let color = isSel ? '#ffffff' : hasTaken ? 'var(--ok)' : 'var(--tx)';
+   let border = isSel ? '1px solid var(--pr)' : hasTaken ? '1px solid var(--ok)' : '1px solid var(--bd)';
+   let title = isSel ? 'Fecha actual seleccionada' : hasTaken ? 'Asistencia ya registrada' : 'Día de clase programado';
+   cells.push('<button type="button" onclick="pickClassDate(\'' + dStr + '\')" title="' + title + '" style="height:32px;padding:0;display:flex;align-items:center;justify-content:center;background:' + bg + ';color:' + color + ';border:' + border + ';border-radius:6px;font-weight:' + (isSel?'700':'500') + ';font-size:13px;cursor:pointer">' + d + (hasTaken && !isSel ? ' •' : '') + '</button>');
+  } else {
+   cells.push('<div title="No hay clase este día" style="height:32px;display:flex;align-items:center;justify-content:center;color:var(--mu);opacity:0.25;font-size:13px;user-select:none">' + d + '</div>');
+  }
+ }
+ const schedNames = g.horario.map(h => DIAS[h.dia]).filter((v,i,a)=>a.indexOf(v)===i).join(', ');
+ return '<div id="cal-box" style="position:absolute;right:0;top:calc(100% + 6px);z-index:200;background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;box-shadow:0 8px 24px rgba(0,0,0,0.25);width:290px">' +
+  '<div class="row sp" style="margin-bottom:8px">' +
+    '<button type="button" onclick="changeCalMonth(-1)" style="padding:4px 8px;font-size:14px">‹</button>' +
+    '<b style="text-transform:capitalize;font-size:14px">' + MESES[m-1] + ' ' + y + '</b>' +
+    '<button type="button" onclick="changeCalMonth(1)" style="padding:4px 8px;font-size:14px">›</button>' +
+  '</div>' +
+  '<div style="font-size:11px;color:var(--mu);margin-bottom:8px;text-align:center">Días de clase: <b style="color:var(--tx)">' + e(schedNames) + '</b></div>' +
+  '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;font-size:11px;font-weight:600;margin-bottom:4px">' +
+    D_HEADERS.map((dh,idx)=>'<span style="color:' + (daysSet.has(idx)?'var(--pr)':'var(--mu)') + '">' + dh + '</span>').join('') +
+  '</div>' +
+  '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">' +
+    cells.join('') +
+  '</div>' +
+  '<div class="row sp" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--bd)">' +
+    '<button type="button" onclick="pickClassDate(getNearestClassDate(cur(),today()))" style="font-size:12px;padding:4px 8px">Hoy / más reciente</button>' +
+    '<button type="button" onclick="S.calOpen=false;render()" style="font-size:12px;padding:4px 8px">Cerrar</button>' +
+  '</div>' +
+ '</div>';
+}
+
+function asisV(){
+ const g=cur();
+ if(!g) return '<div class="card"><p class="mu">Selecciona un grupo.</p></div>';
+ if(!g.horario || !g.horario.length){
+  return '<div class="card"><h2>Tomar asistencia</h2><p class="mu">Este grupo no tiene días de clase registrados en su horario. Agrega los días en la pestaña <b>Grupos</b> para poder tomar asistencia.</p></div>';
+ }
+ ensureValidClassDate(g);
+ const rec = g.records[S.date] || {};
+ const aq = (S.asisQ || '').toLowerCase().trim();
+ const asisList = g.students.filter(s => !aq || s.id.toLowerCase().includes(aq) || s.nombre.toLowerCase().includes(aq));
+ const [cy, cm, cd] = S.date.split('-').map(Number);
+ const dObj = new Date(cy, cm - 1, cd);
+ const diaNombre = DIAS[dObj.getDay()];
+ const fechaFormateada = diaNombre + ', ' + cd + ' de ' + MESES[cm-1] + ' ' + cy;
+
+ return '<div class="card"><div class="row sp"><h2>Tomar asistencia</h2>' +
+ '<div class="row" style="position:relative">' +
+   '<input placeholder="Buscar por id o nombre" value="' + e(S.asisQ||'') + '" oninput="S.asisQ=this.value;render();const i=document.getElementById(\'aq\');i&&(i.focus(),i.setSelectionRange(99,99))" id="aq" style="max-width:200px;padding:6px 10px;font-size:13px">' +
+   '<div style="position:relative;display:inline-block">' +
+     '<div class="row" style="gap:4px">' +
+       '<button type="button" onclick="stepClassDate(-1)" title="Clase anterior" style="padding:6px 9px">◀</button>' +
+       '<button id="cal-toggle-btn" type="button" onclick="S.calOpen=!S.calOpen;render()" style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:500;padding:6px 10px;background:var(--item-bg);border:1px solid var(--bd);cursor:pointer" title="Abrir calendario de clases">' +
+         '📅 <span>' + e(fechaFormateada) + '</span> <span style="font-size:10px;margin-left:2px">▼</span>' +
+       '</button>' +
+       '<button type="button" onclick="stepClassDate(1)" title="Próxima clase" style="padding:6px 9px">▶</button>' +
+     '</div>' +
+     calV(g) +
+   '</div>' +
+ '</div></div>' +
+ (g.students.length ? ('<div class="sc"><table><tr><th>Identificador</th><th>Nombre completo</th><th class="c">Asistencia</th></tr>' +
+ asisList.map(s=>'<tr><td>' + e(s.id) + '</td><td>' + e(s.nombre) + '</td><td class="c">' +
+ '<button class="pill ' + (rec[s.id]==='P'?'ok':'') + '" onclick="mark(\'' + e(s.id) + '\',\'P\')">Asistió</button> ' +
+ '<button class="pill ' + (rec[s.id]==='A'?'ko':'') + '" onclick="mark(\'' + e(s.id) + '\',\'A\')">Faltó</button></td></tr>').join('') +
+ '</table>' + (!asisList.length ? ('<p class="mu" style="margin:10px 0;font-size:13px">No se encontraron estudiantes para "' + e(S.asisQ) + '".</p>') : '') + '</div>') : '<p class="mu">Agrega estudiantes en la pestaña Grupos.</p>') + '</div>';
+}
 
 function histV(){const g=cur(),ds=classDates(g,S.month),[y,m]=S.month.split('-'),f=S.fst;
  let body='';
@@ -452,8 +592,7 @@ function gruposV(){const g=cur();
        }).join('')}</div>`;
 
    const sq = (S.stuQ || '').toLowerCase().trim();
-   const listStudents = g.students.map((s, idx) => ({ s, idx }))
-     .filter(({ s }) => !sq || s.id.toLowerCase().includes(sq) || s.nombre.toLowerCase().includes(sq));
+   const listStudents = g.students.filter(s => !sq || s.id.toLowerCase().includes(sq) || s.nombre.toLowerCase().includes(sq));
 
    h+=`<div class="card"><div class="row sp"><h2>${e(g.carrera)} · ${e(g.jornada)}</h2><button class="d" onclick="delGroup()">Eliminar grupo</button></div>
    <label>Horario</label>
@@ -465,7 +604,7 @@ function gruposV(){const g=cur();
      <label style="margin:0;font-size:13px;font-weight:600">Listado de estudiantes (${listStudents.length}${sq?` de ${g.students.length}`:''})</label>
      <input placeholder="Buscar por id o nombre" value="${e(S.stuQ||'')}" oninput="S.stuQ=this.value;render();const i=document.getElementById('sq');i&&(i.focus(),i.setSelectionRange(99,99))" id="sq" style="max-width:240px;padding:6px 10px;font-size:13px">
    </div>
-   <div class="sc" style="margin-top:6px"><table>${listStudents.map(s=>`<tr><td style="font-family:monospace;width:140px">${e(s.id)}</td><td>${e(s.nombre)}</td><td style="width:50px;text-align:right"><button class="d" onclick="delStu(\'${e(s.id)}\')" title="Quitar estudiante">✕</button></td></tr>`).join('')}</table>${!listStudents.length?`<p class="mu" style="margin:10px 0;font-size:13px">No se encontraron estudiantes para "${e(S.stuQ)}".</p>`:''}</div></div>`;
+   <div class="sc" style="margin-top:6px"><table>${listStudents.map(s=>`<tr><td style="font-family:monospace;width:140px">${e(s.id)}</td><td>${e(s.nombre)}</td><td style="width:50px;text-align:right"><button class="d" onclick="delStu('${e(s.id)}')" title="Quitar estudiante">✕</button></td></tr>`).join('')}</table>${!listStudents.length?`<p class="mu" style="margin:10px 0;font-size:13px">No se encontraron estudiantes para "${e(S.stuQ)}".</p>`:''}</div></div>`;
  }
  return h}
 
@@ -476,8 +615,9 @@ function render(){
  if(!cur()&&groups().length){S.gid=groups()[0].id;S.carrera=groups()[0].carrera}
  const has=!!cur();if(!has)S.tab='grupos';
  $('app').innerHTML=`<div class="row sp" style="margin-bottom:12px"><h1>Asistencia</h1><div class="row"><button type="button" onclick="toggleTheme()" title="Cambiar tema">${themeBtn()}</button><span class="mu" id="st">${e(st)}</span>${SY().token?'<button onclick="sync()">Sincronizar</button>':''}<span class="mu">${e(S.user)}</span><button onclick="logout()">Salir</button></div></div>
- <div class="tabs">${T.map(([k,l])=>`<button class="${S.tab===k?'on':''}" onclick="S.tab='${k}';render()">${l}</button>`).join('')}</div>
+ <div class="tabs">${T.map(([k,l])=>`<button class="${S.tab===k?'on':''}" onclick="S.tab='${k}';S.calOpen=false;render()">${l}</button>`).join('')}</div>
  ${has?selV():''}${S.tab==='grupos'?gruposV():S.tab==='asistencia'&&has?asisV():S.tab==='historico'&&has?histV():dashV()}`}
 setInterval(()=>sched(0),60000);addEventListener('online',()=>sched(0));
+document.addEventListener('click',e=>{if(S.calOpen&&!e.target.closest('#cal-box')&&!e.target.closest('#cal-toggle-btn')){S.calOpen=false;render()}});
 render();
 </script></body></html>
