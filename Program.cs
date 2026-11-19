@@ -19,9 +19,26 @@ if (string.IsNullOrWhiteSpace(jk) || jk.Length < 32 || jk.StartsWith("CAMBIAR"))
     Console.WriteLine("ADVERTENCIA: usando Jwt:Key de ejemplo (solo desarrollo).");
 }
 
+b.WebHost.UseUrls("http://0.0.0.0:5000");
+
 b.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(cfg.GetConnectionString("Default")));
-b.Services.AddScoped<IAsistenciaRepository, AsistenciaRepository>();
-b.Services.AddCors(o => o.AddDefaultPolicy(p => p.WithOrigins(cfg.GetSection("Cors:Origins").Get<string[]>() ?? []).AllowAnyHeader().AllowAnyMethod()));
+b.Services.AddSingleton<JsonFileAsistenciaRepository>();
+b.Services.AddScoped<IAsistenciaRepository>(sp =>
+{
+    var jsonRepo = sp.GetRequiredService<JsonFileAsistenciaRepository>();
+    try
+    {
+        var db = sp.GetRequiredService<AppDbContext>();
+        if (db.Database.CanConnect())
+        {
+            return new AsistenciaRepository(db);
+        }
+    }
+    catch { }
+    return jsonRepo;
+});
+
+b.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 b.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(o =>
 {
     o.MapInboundClaims = false;
@@ -44,8 +61,24 @@ var app = b.Build();
 
 using (var s = app.Services.CreateScope())
 {
-    var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
-    if (cfg.GetValue("Db:UsarMigraciones", false)) db.Database.Migrate(); else db.Database.EnsureCreated();
+    try
+    {
+        var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+        if (db.Database.CanConnect())
+        {
+            if (cfg.GetValue("Db:UsarMigraciones", false)) db.Database.Migrate(); 
+            else db.Database.EnsureCreated();
+            Console.WriteLine("[DB] Conectado exitosamente a PostgreSQL.");
+        }
+        else
+        {
+            Console.WriteLine("[DB] PostgreSQL no disponible. Usando base de datos persistente en data/asistencia_db.json.");
+        }
+    }
+    catch
+    {
+        Console.WriteLine("[DB] PostgreSQL no disponible. Usando base de datos persistente en data/asistencia_db.json.");
+    }
 }
 
 if (cfg.GetValue("Https:Forzar", !app.Environment.IsDevelopment())) { app.UseHsts(); app.UseHttpsRedirection(); }
@@ -66,31 +99,30 @@ static GrupoDto Map(Grupo g) => new(g.Id, g.Carrera, g.Jornada, g.Horarios.Selec
 
 // ===== Autenticación =====
 app.MapGet("/api/health", () => Results.Ok("ok"));
-app.MapPost("/api/auth/register", async (AuthReq r, AppDbContext db) =>
+app.MapPost("/api/auth/register", async (AuthReq r, IAsistenciaRepository repo) =>
 {
     var em = r.Email.Trim().ToLowerInvariant();
     if (!Regex.IsMatch(em, @"^[a-z0-9._+-]+@gmail\.com$")) return Results.BadRequest(new { error = "Usa un correo Gmail válido." });
     if (!Regex.IsMatch(r.Password, @"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$")) return Results.BadRequest(new { error = "La contraseña debe tener mínimo 8 caracteres con mayúsculas, minúsculas y números." });
-    if (await db.Docentes.AnyAsync(x => x.Email == em)) return Results.Conflict(new { error = "Ese correo ya está registrado." });
-    var u = new Docente { Email = em, PasswordHash = BCrypt.Net.BCrypt.HashPassword(r.Password) };
-    db.Docentes.Add(u); await db.SaveChangesAsync();
+    if (await repo.GetDocenteByEmail(em) is not null) return Results.Conflict(new { error = "Ese correo ya está registrado." });
+    var u = await repo.CreateDocente(em, BCrypt.Net.BCrypt.HashPassword(r.Password));
     return Results.Ok(new AuthRes(Token(u), em));
 }).RequireRateLimiting("auth");
-app.MapPost("/api/auth/login", async (AuthReq r, AppDbContext db) =>
+app.MapPost("/api/auth/login", async (AuthReq r, IAsistenciaRepository repo) =>
 {
     var em = r.Email.Trim().ToLowerInvariant();
-    var u = await db.Docentes.FirstOrDefaultAsync(x => x.Email == em);
+    var u = await repo.GetDocenteByEmail(em);
     return u is null || !BCrypt.Net.BCrypt.Verify(r.Password, u.PasswordHash)
         ? Results.Json(new { error = "Correo o contraseña incorrectos." }, statusCode: 401)
         : Results.Ok(new AuthRes(Token(u), em));
 }).RequireRateLimiting("auth");
 var resetTokens = new System.Collections.Concurrent.ConcurrentDictionary<string, (string Email, DateTime Exp)>();
 
-app.MapPost("/api/auth/forgot-password", async (ForgotReq r, AppDbContext db, HttpContext ctx) =>
+app.MapPost("/api/auth/forgot-password", async (ForgotReq r, IAsistenciaRepository repo, HttpContext ctx) =>
 {
     var em = r.Email?.Trim().ToLowerInvariant() ?? "";
     if (!Regex.IsMatch(em, @"^[a-z0-9._+-]+@gmail\.com$")) return Results.BadRequest(new { error = "Usa un correo Gmail válido." });
-    var u = await db.Docentes.FirstOrDefaultAsync(x => x.Email == em);
+    var u = await repo.GetDocenteByEmail(em);
     if (u is null) return Results.NotFound(new { error = "No se encontró una cuenta con ese correo." });
     var tok = Guid.NewGuid().ToString("N");
     resetTokens[tok] = (em, DateTime.UtcNow.AddHours(1));
@@ -98,30 +130,26 @@ app.MapPost("/api/auth/forgot-password", async (ForgotReq r, AppDbContext db, Ht
     return Results.Ok(new { message = "Enlace de recuperación generado.", link });
 }).RequireRateLimiting("auth");
 
-app.MapPost("/api/auth/reset-with-token", async (ResetWithTokenReq r, AppDbContext db) =>
+app.MapPost("/api/auth/reset-with-token", async (ResetWithTokenReq r, IAsistenciaRepository repo) =>
 {
     var em = r.Email?.Trim().ToLowerInvariant() ?? "";
     if (!resetTokens.TryGetValue(r.Token, out var entry) || entry.Email != em || entry.Exp < DateTime.UtcNow)
         return Results.BadRequest(new { error = "El enlace de recuperación es inválido o ha expirado." });
     if (!Regex.IsMatch(r.NewPassword, @"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$"))
         return Results.BadRequest(new { error = "La nueva contraseña debe tener mínimo 8 caracteres con mayúsculas, minúsculas y números." });
-    var u = await db.Docentes.FirstOrDefaultAsync(x => x.Email == em);
-    if (u is null) return Results.NotFound(new { error = "Docente no encontrado." });
-    u.PasswordHash = BCrypt.Net.BCrypt.HashPassword(r.NewPassword);
-    await db.SaveChangesAsync();
+    if (!await repo.UpdatePassword(em, BCrypt.Net.BCrypt.HashPassword(r.NewPassword)))
+        return Results.NotFound(new { error = "Docente no encontrado." });
     resetTokens.TryRemove(r.Token, out _);
     return Results.Ok(new { message = "Contraseña actualizada correctamente." });
 }).RequireRateLimiting("auth");
 
-app.MapPost("/api/auth/reset-password", async (AuthReq r, AppDbContext db) =>
+app.MapPost("/api/auth/reset-password", async (AuthReq r, IAsistenciaRepository repo) =>
 {
     var em = r.Email.Trim().ToLowerInvariant();
     if (!Regex.IsMatch(em, @"^[a-z0-9._+-]+@gmail\.com$")) return Results.BadRequest(new { error = "Usa un correo Gmail válido." });
     if (!Regex.IsMatch(r.Password, @"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$")) return Results.BadRequest(new { error = "La nueva contraseña debe tener mínimo 8 caracteres con mayúsculas, minúsculas y números." });
-    var u = await db.Docentes.FirstOrDefaultAsync(x => x.Email == em);
-    if (u is null) return Results.NotFound(new { error = "No se encontró una cuenta con ese correo." });
-    u.PasswordHash = BCrypt.Net.BCrypt.HashPassword(r.Password);
-    await db.SaveChangesAsync();
+    if (!await repo.UpdatePassword(em, BCrypt.Net.BCrypt.HashPassword(r.Password)))
+        return Results.NotFound(new { error = "No se encontró una cuenta con ese correo." });
     return Results.Ok(new { message = "Contraseña actualizada correctamente." });
 }).RequireRateLimiting("auth");
 

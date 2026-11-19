@@ -182,4 +182,28 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
         }
         await db.SaveChangesAsync();
     }
+
+    public async Task<Docente?> GetDocenteByEmail(string email)
+    {
+        var em = email.Trim().ToLowerInvariant();
+        return await db.Docentes.FirstOrDefaultAsync(x => x.Email == em);
+    }
+
+    public async Task<Docente> CreateDocente(string email, string passwordHash)
+    {
+        var u = new Docente { Email = email.Trim().ToLowerInvariant(), PasswordHash = passwordHash, CreatedAt = DateTime.UtcNow };
+        db.Docentes.Add(u);
+        await db.SaveChangesAsync();
+        return u;
+    }
+
+    public async Task<bool> UpdatePassword(string email, string passwordHash)
+    {
+        var em = email.Trim().ToLowerInvariant();
+        var u = await db.Docentes.FirstOrDefaultAsync(x => x.Email == em);
+        if (u is null) return false;
+        u.PasswordHash = passwordHash;
+        await db.SaveChangesAsync();
+        return true;
+    }
 }

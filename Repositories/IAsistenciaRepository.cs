@@ -16,4 +16,7 @@ public interface IAsistenciaRepository
     Task<object?> Resumen(Guid d, Guid gid, string? q);
     Task<SyncPayload> Pull(Guid d, DateTime since);
     Task Push(Guid d, SyncPayload p);
+    Task<Docente?> GetDocenteByEmail(string email);
+    Task<Docente> CreateDocente(string email, string passwordHash);
+    Task<bool> UpdatePassword(string email, string passwordHash);
 }

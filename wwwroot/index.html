@@ -1,650 +1,1899 @@
 <!DOCTYPE html>
-<html lang="es"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Sistema de Asistencia</title>
-<style>
-:root{box-sizing:border-box;color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#ffffff;--card:#ffffff;--item-bg:#f8fafc;--tx:#1d2330;--mu:#5f6b7d;--bd:#dde3ea;--pr:#005B9B;--ok:#008000;--ko:#c8372d;--ac:#F2C500}
-:root[data-theme="dark"]{color-scheme:dark;--bg:#10151c;--card:#19212b;--item-bg:#141a22;--tx:#e8ebf3;--mu:#9aa6b8;--bd:#2a3442;--pr:#3d9be0;--ok:#3fbf3f;--ko:#ff7a72;--ac:#F2C500}
-html{scroll-padding-top:env(safe-area-inset-top,0px)}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
-.w{max-width:960px;margin:0 auto;padding:14px}
-.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.03)}
-h1{font-size:20px;margin:0;color:var(--pr);border-left:6px solid var(--ac);padding-left:10px}h2{font-size:16px;margin:0 0 10px}
-.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.sp{justify-content:space-between}
-label{font-size:12px;color:var(--mu);display:block;margin-bottom:3px}
-input,select,button{font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--tx)}
-button{cursor:pointer}button.p{background:var(--pr);color:#fff;border-color:var(--pr)}button.d{color:var(--ko)}
-.tabs{display:flex;gap:6px;overflow-x:auto;margin-bottom:12px}.tabs button.on{background:var(--pr);color:#fff;border-color:var(--pr);box-shadow:inset 0 -3px 0 var(--ac)}
-.sc{overflow-x:auto}table{border-collapse:collapse;width:100%}th,td{padding:7px 9px;border-bottom:1px solid var(--bd);text-align:left;white-space:nowrap}
-td.c,th.c{text-align:center}.ok{color:var(--ok);font-weight:600}.ko{color:var(--ko);font-weight:600}.mu{color:var(--mu)}
-.msg{color:var(--ko);font-size:13px;margin:8px 0}.kpi{flex:1;min-width:120px;text-align:center}.kpi b{display:block;font-size:26px}
-.bar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--bd);min-width:120px;flex:1}
-.bar i{display:block}.pill{padding:3px 9px;border-radius:99px;border:1px solid var(--bd);font-size:13px}
-.pill.ok{background:var(--ok);color:#fff;border-color:var(--ok)}.pill.ko{background:var(--ko);color:#fff;border-color:var(--ko)}
-</style></head><body><div class="w" id="app"></div>
-<script>
-// ===== Capa de datos =====
-const Repo={
- load(){try{return JSON.parse(localStorage.getItem('asist_v2'))||{users:{},data:{}}}catch(e){return{users:{},data:{}}}},
- save(db){try{localStorage.setItem('asist_v2',JSON.stringify(db))}catch(e){}}
-};
-let DB=Repo.load();let API='';try{API=localStorage.getItem('asist_api')||''}catch(e){}
-const EYE_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
-const EYE_OFF_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
-const SUN_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>`;
-const MOON_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`;
-let currentTheme='light';try{currentTheme=localStorage.getItem('asist_theme')||'light'}catch(e){}
-function applyTheme(th){currentTheme=th;document.documentElement.setAttribute('data-theme',th);try{localStorage.setItem('asist_theme',th)}catch(e){}}
-function toggleTheme(){applyTheme(currentTheme==='dark'?'light':'dark');render()}
-const themeBtn=()=>currentTheme==='dark'?`<span style="display:inline-flex;align-items:center;gap:6px">${SUN_ICON} Modo claro</span>`:`<span style="display:inline-flex;align-items:center;gap:6px">${MOON_ICON} Modo oscuro</span>`;
-applyTheme(currentTheme);
-const save=()=>{Repo.save(DB);if(S.user)sched()};
-const DIAS=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
-const MESES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-const today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toISOString().slice(0,10);
-const e=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const qParams=new URLSearchParams(window.location.search);
-const initToken=qParams.get('token'), initEmail=qParams.get('email');
-const S={user:null,mode:(initToken&&initEmail)?'reset':'login',resetToken:initToken||'',resetEmail:initEmail||'',recEmail:'',recSent:false,recLink:'',err:'',tab:'grupos',carrera:'',materia:'',gid:'',date:today(),month:today().slice(0,7),fdate:'',fst:'todos',q:'',stuQ:'',asisQ:'',calOpen:false,calMonth:'',tmp:[],editTmpIdx:-1,editSchedIdx:-1,newCarrera:'',newMateria:'',newJornada:''};
-const $=id=>document.getElementById(id);
-const groups=()=>DB.data[S.user].groups;
-const cur=()=>groups().find(g=>g.id===S.gid);
-async function hash(em,p){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(em+':'+p));return[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}
-
-// ===== Autenticación =====
-const uid=()=>crypto.randomUUID?crypto.randomUUID():'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return(c=='x'?r:r&3|8).toString(16)});
-const iso=()=>new Date().toISOString();
-const SY=()=>(DB.data[S.user].sync=DB.data[S.user].sync||{token:'',since:'1970-01-01T00:00:00.000Z',pushed:'',tomb:[]});
-async function api(m,p,b,tok){try{const r=await fetch(API+p,{method:m,signal:AbortSignal.timeout(8000),headers:{'Content-Type':'application/json',...(tok?{Authorization:'Bearer '+tok}:{})},body:b?JSON.stringify(b):undefined});let j=null;try{j=await r.json()}catch(e){}return{ok:r.ok,status:r.status,body:j}}catch(e){return{net:true}}}
-async function auth(){
- const em=$('em').value.trim().toLowerCase(),pw=$('pw').value,reg=S.mode==='reg';
- if(!/^[a-z0-9._+-]+@gmail\.com$/.test(em))return fail('Usa un correo Gmail válido (@gmail.com).');
- if(reg&&!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/.test(pw))return fail('La contraseña debe tener mínimo 8 caracteres, con mayúsculas, minúsculas y números.');
- const lh=await hash(em,pw);let tok='';
- const sv=$('sv');if(sv){API=sv.value.trim().replace(/\/$/,'');try{localStorage.setItem('asist_api',API)}catch(e){}}
- const r=await api('POST','/api/auth/'+(reg?'register':'login'),{email:em,password:pw},'');
- if(r.net){ // sin servidor: modo local
-  if(reg){if(DB.users[em])return fail('Ese correo ya está registrado.')}else if(DB.users[em]!==lh)return fail('Correo o contraseña incorrectos.')
- }else if(r.ok)tok=r.body.token;
- else if(!reg&&r.status===401&&DB.users[em]===lh){const r2=await api('POST','/api/auth/register',{email:em,password:pw},'');if(r2.ok)tok=r2.body.token} // cuenta creada sin conexión
- else return fail(r.body?.error||'No se pudo autenticar.');
- DB.users[em]=lh;DB.data[em]=DB.data[em]||{groups:[]};S.user=em;SY().token=tok;Repo.save(DB);
- S.err='';S.gid=groups()[0]?.id||'';S.carrera=groups()[0]?.carrera||'';S.materia=groups()[0]?.materia||'';S.tab='grupos';render();sched(0);
-}
-function fail(m){S.err=m;render()}
-function togglePw(id='pw', btnId='eye-btn'){
- const p=$(id), b=$(btnId);if(!p)return;
- const isPw = p.type==='password';
- p.type = isPw ? 'text' : 'password';
- if(b){b.innerHTML = isPw ? EYE_OFF_ICON : EYE_ICON; b.title = isPw ? 'Ocultar contraseña' : 'Mostrar contraseña';}
-}
-async function sendRecoveryEmail(){
- const em=($('em')?.value||'').trim().toLowerCase();
- if(!/^[a-z0-9._+-]+@gmail\.com$/.test(em))return fail('Usa un correo Gmail válido (@gmail.com).');
- S.err='';
- const tok = uid();
- let link = window.location.origin + window.location.pathname + '?token=' + tok + '&email=' + encodeURIComponent(em);
- const r = await api('POST','/api/auth/forgot-password',{email:em},'');
- if(r.net){
-  if(!DB.users[em])return fail('No se encontró una cuenta registrada con ese correo.');
-  DB.tokens = DB.tokens || {};
-  DB.tokens[tok] = { email: em, exp: Date.now() + 3600000 };
-  Repo.save(DB);
- } else if(r.ok){
-  if(r.body?.link) link = r.body.link;
- } else {
-  return fail(r.body?.error || 'No se pudo generar el enlace de recuperación.');
- }
- S.recEmail = em;
- S.recLink = link;
- S.recSent = true;
- render();
-}
-function openResetLink(link){
- window.location.href = link;
-}
-function cleanUrlAndLogin(){
- try{ history.replaceState(null,'',window.location.pathname); }catch(e){}
- S.mode='login';S.resetToken='';S.resetEmail='';S.recSent=false;S.err='';render();
-}
-async function submitNewPassword(){
- const pw=($('pw')?.value||'');
- if(!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/.test(pw))
-  return fail('La nueva contraseña debe tener mínimo 8 caracteres con mayúsculas, minúsculas y números.');
- const em = S.resetEmail, tok = S.resetToken;
- const r = await api('POST','/api/auth/reset-with-token',{email:em,token:tok,newPassword:pw},'');
- const lh = await hash(em,pw);
- if(r.net){
-  DB.tokens = DB.tokens || {};
-  const t = DB.tokens[tok];
-  if(!t || t.email !== em || t.exp < Date.now()){
-   return fail('El enlace de recuperación es inválido o ha expirado.');
-  }
-  DB.users[em] = lh;
-  delete DB.tokens[tok];
-  Repo.save(DB);
- } else if(r.ok){
-  DB.users[em] = lh;
-  Repo.save(DB);
- } else {
-  return fail(r.body?.error || 'No se pudo restablecer la contraseña.');
- }
- alert('¡Contraseña actualizada correctamente! Ya puedes iniciar sesión con tu nueva contraseña.');
- cleanUrlAndLogin();
-}
-
-// ===== Sincronización (local primero; last-write-wins por fecha de actualización) =====
-let st='',tm=null,busy=false,again=false;
-const stat=()=>{const x=$('st');if(x)x.textContent=st};
-const sched=(ms=1500)=>{clearTimeout(tm);tm=setTimeout(sync,ms)};
-function logout(){if(S.user){SY().token='';Repo.save(DB)}S.user=null;st='';render()}
-function fin(r,y){busy=false;if(r.net)st='Sin conexión · cambios pendientes';else if(r.status===401){y.token='';st='Sesión expirada: vuelve a iniciar sesión'}else st='Error de sincronización';stat();if(again){again=false;if(!r.net)sched()}}
-async function sync(){
- if(!S.user)return;if(busy){again=true;return}
- const em=S.user,D=DB.data[em],y=SY();if(!y.token)return;
- busy=true;st='Sincronizando…';stat();const ini=iso(),nw=t=>!y.pushed||t>y.pushed;
- const P={grupos:[],estudiantes:[],registros:[]};
- D.groups.forEach(g=>{
-  if(nw(g.u))P.grupos.push({id:g.id,carrera:g.carrera,jornada:g.jornada,materia:g.materia||'',horarios:g.horario.map(h=>({dia:+h.dia,inicio:h.ini,fin:h.fin})),updatedAt:g.u,deleted:false});
-  g.students.forEach(s=>{
-   if(nw(s.u))P.estudiantes.push({id:s.uid,grupoId:g.id,codigo:s.id,nombreCompleto:s.nombre,updatedAt:s.u,deleted:false});
-   for(const d in g.records){const v=g.records[d][s.id],t=(g.ru||{})[d+'|'+s.id];if(v&&t&&nw(t))P.registros.push({id:uid(),estudianteId:s.uid,fecha:d,presente:v==='P',updatedAt:t,deleted:false})}})});
- y.tomb.forEach(t=>t.t==='g'?P.grupos.push({id:t.id,carrera:t.carrera,jornada:t.jornada,materia:t.materia||'',horarios:[],updatedAt:t.u,deleted:true}):t.t==='e'?P.estudiantes.push({id:t.uid,grupoId:t.gid,codigo:t.id,nombreCompleto:t.nombre,updatedAt:t.u,deleted:true}):P.registros.push({id:uid(),estudianteId:t.uid,fecha:t.fecha,presente:false,updatedAt:t.u,deleted:true}));
- let r=await api('POST','/api/sync',P,y.token);if(!r.ok)return fin(r,y);
- y.tomb=y.tomb.filter(t=>t.u>ini);y.pushed=ini;
- r=await api('GET','/api/sync?since='+encodeURIComponent(y.since),null,y.token);if(!r.ok)return fin(r,y);
- const ch=merge(r.body,D);y.since=new Date(Date.parse(r.body.serverTime)-3e5).toISOString(); // 5 min de solape por diferencias de reloj
- Repo.save(DB);busy=false;st='Sincronizado '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
- if(S.user===em&&ch&&!document.activeElement?.matches('input,textarea,select'))render();else stat();
- if(again){again=false;sched()}
-}
-function merge(B,D){
- let ch=false;const T=x=>Date.parse(x);
- B.grupos.forEach(x=>{let g=D.groups.find(q=>q.id===x.id);
-  if(x.deleted){if(g&&T(x.updatedAt)>T(g.u)){D.groups=D.groups.filter(q=>q!==g);ch=true}return}
-  if(!g){D.groups.push(g={id:x.id,carrera:'',jornada:'',materia:'',horario:[],students:[],records:{},ru:{},u:'1970'});ch=true}
-  if(T(x.updatedAt)>T(g.u)){g.carrera=x.carrera;g.jornada=x.jornada;g.materia=x.materia||'';g.horario=x.horarios.map(h=>({dia:h.dia,ini:h.inicio,fin:h.fin}));g.u=x.updatedAt;ch=true}});
- const idx={};D.groups.forEach(g=>g.students.forEach(s=>idx[s.uid]=[g,s]));
- B.estudiantes.forEach(x=>{const g=D.groups.find(q=>q.id===x.grupoId);if(!g)return;const f=idx[x.id];
-  if(x.deleted){if(f&&T(x.updatedAt)>T(f[1].u)){f[0].students=f[0].students.filter(q=>q!==f[1]);delete idx[x.id];ch=true}return}
-  if(!f){const s={uid:x.id,id:x.codigo,nombre:x.nombreCompleto,u:x.updatedAt};g.students.push(s);idx[x.id]=[g,s];ch=true}
-  else if(T(x.updatedAt)>T(f[1].u)){f[1].id=x.codigo;f[1].nombre=x.nombreCompleto;f[1].u=x.updatedAt;ch=true}});
- B.registros.forEach(x=>{const f=idx[x.estudianteId];if(!f)return;const[g,s]=f,k=x.fecha+'|'+s.id;g.ru=g.ru||{};
-  if(g.ru[k]&&T(x.updatedAt)<=T(g.ru[k]))return;
-  g.records[x.fecha]=g.records[x.fecha]||{};if(x.deleted)delete g.records[x.fecha][s.id];else g.records[x.fecha][s.id]=x.presente?'P':'A';g.ru[k]=x.updatedAt;ch=true});
- return ch}
-
-// ===== Utilidades =====
-function classDates(g,m){
- const[y,mo]=m.split('-').map(Number),n=new Date(y,mo,0).getDate(),s=new Set();
- for(let d=1;d<=n;d++)if(g.horario.some(h=>+h.dia===new Date(y,mo-1,d).getDay()))s.add(`${m}-${String(d).padStart(2,'0')}`);
- Object.keys(g.records).forEach(k=>k.startsWith(m)&&s.add(k));return[...s].sort()}
-const fmt=d=>{const[y,m,x]=d.split('-');return `${DIAS[new Date(y,m-1,x).getDay()].slice(0,3)} ${+x}`};
-const horTxt=g=>g.horario.length?g.horario.map(h=>`${DIAS[h.dia]} ${h.ini}–${h.fin}`).join(' · '):'Sin horario';
-function sortStudents(g){if(g&&Array.isArray(g.students))g.students.sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||'','es',{sensitivity:'base'}));}
-function stats(g,s){let p=0,a=0;for(const d in g.records){const v=g.records[d][s.id];if(v==='P')p++;else if(v==='A')a++}return{p,a}}
-
-// ===== Acciones =====
-function pick(k,v){
- S[k]=v;const gs=groups();
- if(k==='carrera'){
-  const gsC=gs.filter(g=>g.carrera===v);
-  const ms=[...new Set(gsC.map(g=>g.materia||''))];
-  S.materia=ms[0]||'';
-  const match=gsC.filter(g=>(g.materia||'')===S.materia);
-  S.gid=match[0]?.id||gsC[0]?.id||'';
- }else if(k==='materia'){
-  const match=gs.filter(g=>g.carrera===S.carrera&&(g.materia||'')===v);
-  S.gid=match[0]?.id||'';
- }
- S.fdate='';S.calOpen=false;S.editSchedIdx=-1;render();
-}
-function mark(idOrIdx,v){
- const g=cur();if(!g)return;
- const s=typeof idOrIdx==='string'?g.students.find(x=>x.id===idOrIdx):g.students[idOrIdx];
- if(!s)return;
- g.records[S.date]=g.records[S.date]||{};
- g.ru=g.ru||{};
- if(g.records[S.date][s.id]===v){
-  delete g.records[S.date][s.id];
-  if(Object.keys(g.records[S.date]).length===0)delete g.records[S.date];
-  SY().tomb.push({t:'r',uid:s.uid,fecha:S.date,u:iso()});
- }else{
-  g.records[S.date][s.id]=v;
- }
- g.ru[S.date+'|'+s.id]=iso();
- save();render();
-}
-function syncNewInputs(){const gc=$('gc'),gj=$('gj'),gm=$('gm');if(gc)S.newCarrera=gc.value;if(gj)S.newJornada=gj.value;if(gm)S.newMateria=gm.value}
-function checkSchedConflict(d, ini, fin, opts={}){
- const diaNum = +d;
- if(opts.checkTmp && S.tmp){
-  for(let idx=0; idx<S.tmp.length; idx++){
-   if(opts.ignoreTmpIdx!==undefined && opts.ignoreTmpIdx===idx) continue;
-   const h=S.tmp[idx];
-   if(+h.dia===diaNum && ini<h.fin && fin>h.ini){
-    return `Conflicto de horario: Ya agregaste una clase el ${DIAS[diaNum]} de ${h.ini} a ${h.fin} en este nuevo grupo. Registra otro horario.`;
-   }
-  }
- }
- const allGroups = groups();
- for(const g of allGroups){
-  const isCur = opts.currentGroupId && g.id===opts.currentGroupId;
-  for(let idx=0; idx<g.horario.length; idx++){
-   if(isCur && opts.currentSchedIdx!==undefined && opts.currentSchedIdx===idx) continue;
-   const h=g.horario[idx];
-   if(+h.dia===diaNum && ini<h.fin && fin>h.ini){
-    const gName = [g.carrera, g.materia, g.jornada].filter(Boolean).join(' · ');
-    if(isCur){
-     return `Conflicto de horario: Este grupo ya tiene una clase programada el ${DIAS[diaNum]} de ${h.ini} a ${h.fin}. Registra otro horario.`;
-    }else{
-     return `Conflicto de horario: Ya existe una clase en el grupo "${gName}" el ${DIAS[diaNum]} de ${h.ini} a ${h.fin}. Por favor registra otro horario.`;
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Sistema de Asistencia</title>
+  <style>
+    /* ==========================================================================
+       1. VARIABLES DE TEMA & ESTILOS BASE
+       ========================================================================== */
+    :root {
+      box-sizing: border-box;
+      color-scheme: light;
+      padding-top: env(safe-area-inset-top, 0px);
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+      --bg: #f4f6f9;
+      --card: #ffffff;
+      --item-bg: #f8fafc;
+      --tx: #1d2330;
+      --mu: #5f6b7d;
+      --bd: #dde3ea;
+      --pr: #005B9B;
+      --ok: #008000;
+      --ko: #c8372d;
+      --ac: #F2C500;
     }
-   }
-  }
- }
- return null;
-}
-function addTmp(){
- syncNewInputs();
- const d=$('gd').value,i=$('gi').value,f=$('gf').value;
- if(!i||!f)return alert('Selecciona hora de inicio y fin.');
- if(i>=f)return alert('La hora de inicio debe ser anterior a la hora de fin.');
- const err = checkSchedConflict(d, i, f, {checkTmp: true});
- if(err) return alert(err);
- S.tmp.push({dia:d,ini:i,fin:f});
- render();
-}
-function delTmp(i){syncNewInputs();S.tmp.splice(i,1);if(S.editTmpIdx===i)S.editTmpIdx=-1;else if(S.editTmpIdx>i)S.editTmpIdx--;render()}
-function startEditTmp(i){syncNewInputs();S.editTmpIdx=i;render()}
-function cancelEditTmp(){syncNewInputs();S.editTmpIdx=-1;render()}
-function saveEditTmp(i){
- syncNewInputs();
- const d=$('te_d').value,ini=$('te_i').value,fin=$('te_f').value;
- if(!ini||!fin)return alert('Selecciona hora de inicio y fin.');
- if(ini>=fin)return alert('La hora de inicio debe ser anterior a la hora de fin.');
- const err = checkSchedConflict(d, ini, fin, {checkTmp: true, ignoreTmpIdx: i});
- if(err) return alert(err);
- S.tmp[i]={dia:d,ini,fin};
- S.editTmpIdx=-1;
- render();
-}
-function createGroup(){
- syncNewInputs();const c=S.newCarrera.trim(),j=S.newJornada.trim(),m=S.newMateria.trim();
- if(!c||!m||!j)return alert('Escribe el grupo/carrera, la asignatura/materia y la jornada.');
- for(const h of S.tmp){
-  const err = checkSchedConflict(h.dia, h.ini, h.fin);
-  if(err) return alert(err);
- }
- const g={id:uid(),carrera:c,materia:m,jornada:j,horario:S.tmp,students:[],records:{},ru:{},u:iso()};
- groups().push(g);S.tmp=[];S.newCarrera='';S.newMateria='';S.newJornada='';S.editTmpIdx=-1;
- S.carrera=c;S.materia=m;S.gid=g.id;save();render()}
-function delGroup(){if(confirm('¿Eliminar este grupo y todo su histórico?')){const g0=cur();SY().tomb.push({t:'g',id:g0.id,carrera:g0.carrera,jornada:g0.jornada,materia:g0.materia||'',u:iso()});DB.data[S.user].groups=groups().filter(g=>g.id!==S.gid);S.gid=groups()[0]?.id||'';S.carrera=groups()[0]?.carrera||'';save();render()}}
-function addSched(){
- const g=cur();if(!g)return;
- const d=$('hd').value,i=$('hi').value,f=$('hf').value;
- if(!i||!f)return alert('Selecciona hora de inicio y fin.');
- if(i>=f)return alert('La hora de inicio debe ser anterior a la hora de fin.');
- const err = checkSchedConflict(d, i, f, {currentGroupId: g.id});
- if(err) return alert(err);
- g.horario.push({dia:d,ini:i,fin:f});
- g.u=iso();
- save();
- render();
-}
-function delSched(i){const g=cur();if(!g)return;if(!confirm('¿Eliminar este horario?'))return;g.horario.splice(i,1);if(S.editSchedIdx===i)S.editSchedIdx=-1;else if(S.editSchedIdx>i)S.editSchedIdx--;g.u=iso();save();render()}
-function startEditSched(i){S.editSchedIdx=i;render()}
-function cancelEditSched(){S.editSchedIdx=-1;render()}
-function saveEditSched(i){
- const g=cur();if(!g)return;
- const d=$('he_d').value,ini=$('he_i').value,fin=$('he_f').value;
- if(!ini||!fin)return alert('Selecciona hora de inicio y fin.');
- if(ini>=fin)return alert('La hora de inicio debe ser anterior a la hora de fin.');
- const err = checkSchedConflict(d, ini, fin, {currentGroupId: g.id, currentSchedIdx: i});
- if(err) return alert(err);
- g.horario[i]={dia:d,ini,fin};
- g.u=iso();
- S.editSchedIdx=-1;
- save();
- render();
-}
-function addStu(){const g=cur(),id=$('si').value.trim(),n=$('sn').value.trim();if(!id||!n)return;
- if(g.students.some(s=>s.id===id))return alert('Ya existe un estudiante con ese identificador.');g.students.push({uid:uid(),id,nombre:n,u:iso()});sortStudents(g);save();render()}
-function bulk(){const g=cur();$('sb').value.split('\n').forEach(l=>{const[i,...n]=l.split(/[,;\t]/);const id=(i||'').trim(),nm=n.join(' ').trim();
- if(id&&nm&&!g.students.some(s=>s.id===id))g.students.push({uid:uid(),id,nombre:nm,u:iso()})});sortStudents(g);save();render()}
-function delStu(idOrIdx){if(confirm('¿Quitar estudiante?')){const g=cur();if(!g)return;const idx=typeof idOrIdx==='string'?g.students.findIndex(x=>x.id===idOrIdx):idOrIdx;if(idx<0||idx>=g.students.length)return;const s=g.students[idx];SY().tomb.push({t:'e',uid:s.uid,gid:g.id,id:s.id,nombre:s.nombre,u:iso()});g.students.splice(idx,1);save();render()}}
 
-// ===== Vistas =====
-function authV(){
- if(S.mode==='forgot'){
-  return `<div style="min-height:calc(100vh - 28px);display:flex;align-items:center;justify-content:center">
-  <div class="card" style="width:100%;max-width:380px;margin:0">
-   <h1 style="font-size:18px;margin-bottom:12px">${S.recSent ? 'Confirmación enviada' : 'Recuperar contraseña'}</h1>
-   ${!S.recSent ? `
-    <p class="mu" style="font-size:13px;margin:0 0 12px">Ingresa tu correo Gmail para enviarte el enlace de recuperación:</p>
-    <label>Correo Gmail</label>
-    <input id="em" type="email" value="${e(S.recEmail||'')}" style="width:100%" onkeydown="if(event.key==='Enter')sendRecoveryEmail()"><br><br>
-    <div class="msg">${e(S.err)}</div>
-    <button class="p" style="width:100%" onclick="sendRecoveryEmail()">Enviar confirmación al correo</button>
-    <p style="text-align:center;margin-top:14px"><a href="#" onclick="S.mode='login';S.err='';render();return false">Volver a iniciar sesión</a></p>
-   ` : `
-    <div style="padding:10px 12px;background:var(--item-bg);border:1px solid var(--bd);border-radius:8px;margin-bottom:12px">
-     <p style="margin:0 0 8px;font-size:14px">Hemos enviado el enlace de confirmación a: <br><b>${e(S.recEmail)}</b></p>
-     <p style="margin:0;font-size:13px;color:var(--mu)">Haz clic en el enlace recibido en tu correo para acceder a la web y definir tu nueva contraseña:</p>
-    </div>
-    <button class="p" style="width:100%" onclick="openResetLink('${e(S.recLink)}')">🔗 Abrir enlace del correo</button>
-    <p style="text-align:center;margin-top:14px"><a href="#" onclick="S.mode='login';S.recSent=false;S.err='';render();return false">Volver a iniciar sesión</a></p>
-   `}
-  </div></div>`;
- }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #10151c;
+      --card: #19212b;
+      --item-bg: #141a22;
+      --tx: #e8ebf3;
+      --mu: #9aa6b8;
+      --bd: #2a3442;
+      --pr: #3d9be0;
+      --ok: #3fbf3f;
+      --ko: #ff7a72;
+      --ac: #F2C500;
+    }
 
- if(S.mode==='reset'){
-  return `<div style="min-height:calc(100vh - 28px);display:flex;align-items:center;justify-content:center">
-  <div class="card" style="width:100%;max-width:380px;margin:0">
-   <h1 style="font-size:18px;margin-bottom:10px">Nueva contraseña</h1>
-   <p class="mu" style="font-size:13px;margin:0 0 12px">Escribe la nueva contraseña para <b>${e(S.resetEmail)}</b>:</p>
-   <label>Nueva contraseña</label>
-   <div style="position:relative;width:100%">
-     <input id="pw" type="password" style="width:100%;padding-right:42px" onkeydown="if(event.key==='Enter')submitNewPassword()">
-     <button id="eye-btn" type="button" onclick="togglePw()" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);background:transparent;border:none;cursor:pointer;padding:6px 8px;color:var(--mu);box-shadow:none" title="Mostrar contraseña">${EYE_ICON}</button>
-   </div>
-   <div class="mu" style="font-size:12px;margin-top:4px">Mínimo 8 caracteres con mayúsculas, minúsculas y números.</div>
-   <div class="msg">${e(S.err)}</div>
-   <button class="p" style="width:100%;margin-top:8px" onclick="submitNewPassword()">Guardar nueva contraseña</button>
-   <p style="text-align:center;margin-top:14px"><a href="#" onclick="cleanUrlAndLogin();return false">Volver a iniciar sesión</a></p>
-  </div></div>`;
- }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
 
- const r=S.mode==='reg';
- return `<div style="min-height:calc(100vh - 28px);display:flex;align-items:center;justify-content:center">
- <div class="card" style="width:100%;max-width:380px;margin:0">
-  <h1 style="font-size:18px;margin-bottom:14px">${r ? 'Crear cuenta' : 'Sistema de Asistencia'}</h1>
+    body {
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--tx);
+      font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
 
-  <label>Correo Gmail</label>
-  <input id="em" type="email" style="width:100%"><br><br>
+    .container {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 16px;
+    }
 
-  <label>Contraseña</label>
-  <div style="position:relative;width:100%">
-    <input id="pw" type="password" style="width:100%;padding-right:42px" onkeydown="if(event.key==='Enter')auth()">
-    <button id="eye-btn" type="button" onclick="togglePw()" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);background:transparent;border:none;cursor:pointer;padding:6px 8px;color:var(--mu);box-shadow:none" title="Mostrar contraseña">${EYE_ICON}</button>
-  </div>
-  ${r ? '<div class="mu" style="font-size:12px;margin-top:4px">Mínimo 8 caracteres con mayúsculas, minúsculas y números.</div>' : ''}
+    /* ==========================================================================
+       2. TARJETAS Y CONTENEDORES
+       ========================================================================== */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--bd);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 14px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+    }
 
-  <div class="msg">${e(S.err)}</div>
-  <button class="p" style="width:100%;margin-top:6px" onclick="auth()">${r ? 'Registrarme' : 'Entrar'}</button>
+    h1 {
+      font-size: 20px;
+      margin: 0;
+      color: var(--pr);
+      border-left: 6px solid var(--ac);
+      padding-left: 10px;
+      font-weight: 700;
+    }
 
-  ${!r ? '<p style="text-align:center;margin:10px 0 0"><a href="#" onclick="S.mode=\'forgot\';S.err=\'\';S.recSent=false;render();return false" style="font-size:13px;color:var(--pr);text-decoration:none">¿Olvidaste tu contraseña?</a></p>' : ''}
+    h2 {
+      font-size: 16px;
+      margin: 0 0 12px;
+      font-weight: 600;
+    }
 
-  <p style="text-align:center;margin-top:12px">
-    <a href="#" onclick="S.mode='${r ? 'login' : 'reg'}';S.err='';render();return false">${r ? 'Ya tengo cuenta' : 'Crear cuenta nueva'}</a>
-  </p>
- </div></div>`;
-}
+    .row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
 
-function selV(){
- const gs=groups(),cs=[...new Set(gs.map(g=>g.carrera))];
- if(cs.length&&!cs.includes(S.carrera))S.carrera=cs[0];
- const gsC=gs.filter(g=>g.carrera===S.carrera);
- const ms=[...new Set(gsC.map(g=>g.materia||''))];
- if(ms.length&&!ms.includes(S.materia))S.materia=ms[0];
- const js=gsC.filter(g=>(g.materia||'')===S.materia);
- if(js.length&&!js.some(g=>g.id===S.gid))S.gid=js[0].id;
+    .row-sp {
+      justify-content: space-between;
+    }
 
- return `<div class="card row" style="align-items:flex-end">
-  <div style="flex:1;min-width:130px"><label>Grupo / carrera</label><select onchange="pick('carrera',this.value)" style="width:100%">${cs.map(c=>`<option ${c===S.carrera?'selected':''}>${e(c)}</option>`).join('')}</select></div>
-  <div style="flex:1;min-width:130px"><label>Asignatura / materia</label><select onchange="pick('materia',this.value)" style="width:100%">${ms.map(m=>`<option value="${e(m)}" ${m===S.materia?'selected':''}>${e(m||'(General)')}</option>`).join('')}</select></div>
-  <div style="flex:1;min-width:110px"><label>Jornada</label><select onchange="S.gid=this.value;S.fdate='';S.calOpen=false;render()" style="width:100%">${js.map(g=>`<option value="${g.id}" ${g.id===S.gid?'selected':''}>${e(g.jornada)}</option>`).join('')}</select></div>
-  <div class="mu" style="flex:1.2;min-width:160px;padding-bottom:6px">${cur()?e(horTxt(cur())):''}</div>
- </div>`;
-}
+    label {
+      font-size: 12px;
+      color: var(--mu);
+      display: block;
+      margin-bottom: 4px;
+      font-weight: 500;
+    }
 
-function getNearestClassDate(g, refDateStr = today()){
- if(!g || !g.horario || !g.horario.length) return refDateStr;
- const daysSet = new Set(g.horario.map(h => +h.dia));
- const curD = new Date(refDateStr + 'T00:00');
- for(let i = 0; i < 7; i++){
-  const d = new Date(curD);
-  d.setDate(d.getDate() - i);
-  if(daysSet.has(d.getDay())){
-   return d.toISOString().slice(0, 10);
-  }
- }
- for(let i = 1; i <= 7; i++){
-  const d = new Date(curD);
-  d.setDate(d.getDate() + i);
-  if(daysSet.has(d.getDay())){
-   return d.toISOString().slice(0, 10);
-  }
- }
- return refDateStr;
-}
+    /* ==========================================================================
+       3. FORMULARIOS Y BOTONES
+       ========================================================================== */
+    input, select, textarea, button {
+      font: inherit;
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--bd);
+      background: var(--card);
+      color: var(--tx);
+      outline: none;
+      transition: border-color 0.2s;
+    }
 
-function ensureValidClassDate(g){
- if(!g || !g.horario || !g.horario.length) return;
- const daysSet = new Set(g.horario.map(h => +h.dia));
- const curD = new Date(S.date + 'T00:00');
- if(!daysSet.has(curD.getDay())){
-  S.date = getNearestClassDate(g, today());
-  S.calMonth = S.date.slice(0, 7);
- }
-}
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--pr);
+    }
 
-function stepClassDate(dir){
- const g = cur();
- if(!g || !g.horario || !g.horario.length) return;
- const daysSet = new Set(g.horario.map(h => +h.dia));
- let d = new Date(S.date + 'T00:00');
- for(let i = 0; i < 60; i++){
-  d.setDate(d.getDate() + dir);
-  if(daysSet.has(d.getDay())){
-   S.date = d.toISOString().slice(0, 10);
-   S.calMonth = S.date.slice(0, 7);
-   render();
-   return;
-  }
- }
-}
+    button {
+      cursor: pointer;
+      user-select: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      font-weight: 500;
+    }
 
-function pickClassDate(dStr){
- S.date = dStr;
- S.calMonth = dStr.slice(0, 7);
- S.calOpen = false;
- render();
-}
+    button:hover {
+      opacity: 0.92;
+    }
 
-function changeCalMonth(delta){
- if(!S.calMonth) S.calMonth = S.date.slice(0, 7);
- const [y, m] = S.calMonth.split('-').map(Number);
- const d = new Date(y, m - 1 + delta, 1);
- S.calMonth = d.toISOString().slice(0, 7);
- render();
-}
+    button.btn-primary {
+      background: var(--pr);
+      color: #ffffff;
+      border-color: var(--pr);
+    }
 
-function calV(g){
- if(!S.calOpen) return '';
- if(!S.calMonth) S.calMonth = S.date.slice(0, 7);
- const [y, m] = S.calMonth.split('-').map(Number);
- const firstDay = new Date(y, m - 1, 1).getDay();
- const daysInMonth = new Date(y, m, 0).getDate();
- const daysSet = new Set(g.horario.map(h => +h.dia));
- const D_HEADERS = ['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sa'];
- const cells = [];
- for(let i = 0; i < firstDay; i++){
-  cells.push('<div style="height:32px"></div>');
- }
- for(let d = 1; d <= daysInMonth; d++){
-  const dStr = y + '-' + String(m).padStart(2,'0') + '-' + String(d).padStart(2,'0');
-  const dayOfWeek = (firstDay + d - 1) % 7;
-  const isClass = daysSet.has(dayOfWeek);
-  const isSel = dStr === S.date;
-  const rec = g.records && g.records[dStr];
-  const hasTaken = rec && Object.keys(rec).length > 0;
-  if(isClass){
-   let bg = isSel ? 'var(--pr)' : hasTaken ? 'rgba(0,128,0,0.12)' : 'var(--item-bg)';
-   let color = isSel ? '#ffffff' : hasTaken ? 'var(--ok)' : 'var(--tx)';
-   let border = isSel ? '1px solid var(--pr)' : hasTaken ? '1px solid var(--ok)' : '1px solid var(--bd)';
-   let title = isSel ? 'Fecha actual seleccionada' : hasTaken ? 'Asistencia ya registrada' : 'Día de clase programado';
-   cells.push('<button type="button" onclick="pickClassDate(\'' + dStr + '\')" title="' + title + '" style="height:32px;padding:0;display:flex;align-items:center;justify-content:center;background:' + bg + ';color:' + color + ';border:' + border + ';border-radius:6px;font-weight:' + (isSel?'700':'500') + ';font-size:13px;cursor:pointer">' + d + (hasTaken && !isSel ? ' •' : '') + '</button>');
-  } else {
-   cells.push('<div title="No hay clase este día" style="height:32px;display:flex;align-items:center;justify-content:center;color:var(--mu);opacity:0.25;font-size:13px;user-select:none">' + d + '</div>');
-  }
- }
- const schedNames = g.horario.map(h => DIAS[h.dia]).filter((v,i,a)=>a.indexOf(v)===i).join(', ');
- return '<div id="cal-box" style="position:absolute;right:0;top:calc(100% + 6px);z-index:200;background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;box-shadow:0 8px 24px rgba(0,0,0,0.25);width:290px">' +
-  '<div class="row sp" style="margin-bottom:8px">' +
-    '<button type="button" onclick="changeCalMonth(-1)" style="padding:4px 8px;font-size:14px">‹</button>' +
-    '<b style="text-transform:capitalize;font-size:14px">' + MESES[m-1] + ' ' + y + '</b>' +
-    '<button type="button" onclick="changeCalMonth(1)" style="padding:4px 8px;font-size:14px">›</button>' +
-  '</div>' +
-  '<div style="font-size:11px;color:var(--mu);margin-bottom:8px;text-align:center">Días de clase: <b style="color:var(--tx)">' + e(schedNames) + '</b></div>' +
-  '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;font-size:11px;font-weight:600;margin-bottom:4px">' +
-    D_HEADERS.map((dh,idx)=>'<span style="color:' + (daysSet.has(idx)?'var(--pr)':'var(--mu)') + '">' + dh + '</span>').join('') +
-  '</div>' +
-  '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">' +
-    cells.join('') +
-  '</div>' +
-  '<div class="row sp" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--bd)">' +
-    '<button type="button" onclick="pickClassDate(getNearestClassDate(cur(),today()))" style="font-size:12px;padding:4px 8px">Hoy / más reciente</button>' +
-    '<button type="button" onclick="S.calOpen=false;render()" style="font-size:12px;padding:4px 8px">Cerrar</button>' +
-  '</div>' +
- '</div>';
-}
+    button.btn-danger {
+      color: var(--ko);
+      background: transparent;
+      border-color: var(--bd);
+    }
 
-function asisV(){
- const g=cur();
- if(!g) return '<div class="card"><p class="mu">Selecciona un grupo.</p></div>';
- if(!g.horario || !g.horario.length){
-  return '<div class="card"><h2>Tomar asistencia</h2><p class="mu">Este grupo no tiene días de clase registrados en su horario. Agrega los días en la pestaña <b>Grupos</b> para poder tomar asistencia.</p></div>';
- }
- ensureValidClassDate(g);
- const rec = g.records[S.date] || {};
- const aq = (S.asisQ || '').toLowerCase().trim();
- const asisList = g.students.filter(s => !aq || s.id.toLowerCase().includes(aq) || s.nombre.toLowerCase().includes(aq));
- const [cy, cm, cd] = S.date.split('-').map(Number);
- const dObj = new Date(cy, cm - 1, cd);
- const diaNombre = DIAS[dObj.getDay()];
- const fechaFormateada = diaNombre + ', ' + cd + ' de ' + MESES[cm-1] + ' ' + cy;
+    button.btn-danger:hover {
+      background: rgba(200, 55, 45, 0.08);
+      border-color: var(--ko);
+    }
 
- return '<div class="card"><div class="row sp"><h2>Tomar asistencia</h2>' +
- '<div class="row" style="position:relative">' +
-   '<input placeholder="Buscar por id o nombre" value="' + e(S.asisQ||'') + '" oninput="S.asisQ=this.value;render();const i=document.getElementById(\'aq\');i&&(i.focus(),i.setSelectionRange(99,99))" id="aq" style="max-width:200px;padding:6px 10px;font-size:13px">' +
-   '<div style="position:relative;display:inline-block">' +
-     '<div class="row" style="gap:4px">' +
-       '<button type="button" onclick="stepClassDate(-1)" title="Clase anterior" style="padding:6px 9px">◀</button>' +
-       '<button id="cal-toggle-btn" type="button" onclick="S.calOpen=!S.calOpen;render()" style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:500;padding:6px 10px;background:var(--item-bg);border:1px solid var(--bd);cursor:pointer" title="Abrir calendario de clases">' +
-         '📅 <span>' + e(fechaFormateada) + '</span> <span style="font-size:10px;margin-left:2px">▼</span>' +
-       '</button>' +
-       '<button type="button" onclick="stepClassDate(1)" title="Próxima clase" style="padding:6px 9px">▶</button>' +
-     '</div>' +
-     calV(g) +
-   '</div>' +
- '</div></div>' +
- (g.students.length ? ('<div class="sc"><table><tr><th>Identificador</th><th>Nombre completo</th><th class="c">Asistencia</th></tr>' +
- asisList.map(s=>'<tr><td>' + e(s.id) + '</td><td>' + e(s.nombre) + '</td><td class="c">' +
- '<button class="pill ' + (rec[s.id]==='P'?'ok':'') + '" onclick="mark(\'' + e(s.id) + '\',\'P\')">Asistió</button> ' +
- '<button class="pill ' + (rec[s.id]==='A'?'ko':'') + '" onclick="mark(\'' + e(s.id) + '\',\'A\')">Faltó</button></td></tr>').join('') +
- '</table>' + (!asisList.length ? ('<p class="mu" style="margin:10px 0;font-size:13px">No se encontraron estudiantes para "' + e(S.asisQ) + '".</p>') : '') + '</div>') : '<p class="mu">Agrega estudiantes en la pestaña Grupos.</p>') + '</div>';
-}
+    /* ==========================================================================
+       4. PESTAÑAS (TABS)
+       ========================================================================== */
+    .tabs {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      margin-bottom: 14px;
+      padding-bottom: 2px;
+    }
 
-function histV(){const g=cur(),ds=classDates(g,S.month),[y,m]=S.month.split('-'),f=S.fst;
- let body='';
- if(S.fdate){const r=g.records[S.fdate]||{};const rows=g.students.filter(s=>f==='todos'||(f==='P'?r[s.id]==='P':r[s.id]!=='P'&&f==='A'?r[s.id]==='A':false));
-  body=`<table><tr><th>Identificador</th><th>Nombre completo</th><th class="c">Estado</th></tr>${rows.map(s=>`<tr><td>${e(s.id)}</td><td>${e(s.nombre)}</td><td class="c ${r[s.id]==='P'?'ok':r[s.id]==='A'?'ko':'mu'}">${r[s.id]==='P'?'Asistió':r[s.id]==='A'?'Faltó':'Sin registrar'}</td></tr>`).join('')}</table>`}
- else{const rows=g.students.filter(s=>{if(f==='todos')return true;return ds.some(d=>g.records[d]?.[s.id]===f)});
-  body=`<table><tr><th>Id</th><th>Nombre</th>${ds.map(d=>`<th class="c">${fmt(d)}</th>`).join('')}<th class="c">Asist.</th><th class="c">Faltas</th></tr>${rows.map(s=>{let p=0,a=0;return `<tr><td>${e(s.id)}</td><td>${e(s.nombre)}</td>${ds.map(d=>{const v=g.records[d]?.[s.id];v==='P'&&p++;v==='A'&&a++;return `<td class="c ${v==='P'?'ok':v==='A'?'ko':'mu'}">${v==='P'?'✓':v==='A'?'✗':'–'}</td>`}).join('')}<td class="c ok">${p}</td><td class="c ko">${a}</td></tr>`}).join('')}</table>`}
- return `<div class="card"><h2>Histórico de ${MESES[+m-1]} ${y}</h2><div class="row" style="margin-bottom:10px">
- <div><label>Mes</label><input type="month" value="${S.month}" onchange="S.month=this.value;S.fdate='';render()"></div>
- <div><label>Fecha</label><select onchange="S.fdate=this.value;render()"><option value="">Todo el mes</option>${ds.map(d=>`<option value="${d}" ${d===S.fdate?'selected':''}>${fmt(d)}</option>`).join('')}</select></div>
- <div><label>Mostrar</label><select onchange="S.fst=this.value;render()"><option value="todos">Todos</option><option value="P" ${f==='P'?'selected':''}>Asistieron</option><option value="A" ${f==='A'?'selected':''}>Faltaron</option></select></div></div>
- <div class="sc">${g.students.length?body:'<p class="mu">Sin estudiantes.</p>'}</div></div>`}
+    .tabs button {
+      padding: 9px 16px;
+      border-radius: 8px;
+      border: 1px solid var(--bd);
+      background: var(--card);
+      color: var(--tx);
+      font-size: 14px;
+    }
 
-function dashV(){const g=cur(),q=S.q.toLowerCase(),ses=Object.keys(g.records).length;let tp=0,ta=0;
- const rows=g.students.map(s=>({s,...stats(g,s)}));rows.forEach(r=>{tp+=r.p;ta+=r.a});
- const pct=tp+ta?Math.round(tp/(tp+ta)*100):0;
- const list=rows.filter(r=>!q||r.s.id.toLowerCase().includes(q)||r.s.nombre.toLowerCase().includes(q));
- return `<div class="row" style="margin-bottom:12px"><div class="card kpi"><b>${g.students.length}</b>Estudiantes</div><div class="card kpi"><b>${ses}</b>Clases registradas</div><div class="card kpi"><b class="ok">${pct}%</b>Asistencia promedio</div></div>
- <div class="card"><div class="row sp"><h2>Asistencias y faltas por estudiante</h2><input placeholder="Buscar por id o nombre" value="${e(S.q)}" oninput="S.q=this.value;render();const i=document.getElementById('q2');i&&(i.focus(),i.setSelectionRange(99,99))" id="q2"></div>
- <div class="row mu" style="font-size:12px;margin:6px 0"><span class="ok">■ Asistencias</span><span class="ko">■ Faltas</span></div>
- ${list.map(r=>{const t=r.p+r.a||1,pct=Math.round(r.p/t*100);return `<div class="row sp" style="margin-bottom:8px;padding:8px 12px;background:var(--item-bg);border:1px solid var(--bd);border-radius:8px;align-items:center"><div style="flex:1.5;min-width:240px;padding-right:12px"><span class="mu" style="font-size:12px;margin-right:8px;font-family:monospace">${e(r.s.id)}</span><b>${e(r.s.nombre)}</b></div><div style="display:flex;align-items:center;gap:12px;flex:1;min-width:200px;justify-content:flex-end"><div class="bar" style="min-width:90px;max-width:220px;flex:1" title="${r.p} asistencias, ${r.a} faltas (${pct}%)"><i style="width:${r.p/t*100}%;background:var(--ok)"></i><i style="width:${r.a/t*100}%;background:var(--ko)"></i></div><div style="min-width:65px;text-align:right;white-space:nowrap;font-size:13px"><span class="ok">${r.p}</span> / <span class="ko">${r.a}</span> <span class="mu" style="font-size:11px;margin-left:2px">(${pct}%)</span></div></div></div>`}).join('')||'<p class="mu">Sin datos.</p>'}</div>`}
+    .tabs button.active {
+      background: var(--pr);
+      color: #ffffff;
+      border-color: var(--pr);
+      box-shadow: inset 0 -3px 0 var(--ac);
+      font-weight: 600;
+    }
 
-function gruposV(){const g=cur();
- const opt=(sel=0)=>DIAS.map((d,i)=>`<option value="${i}" ${+sel===i?'selected':''}>${d}</option>`).join('');
- const sch=(p,d=0,i='18:00',f='20:00')=>`<select id="${p}d">${opt(d)}</select><input type="time" id="${p}i" value="${i}"><input type="time" id="${p}f" value="${f}">`;
+    /* ==========================================================================
+       5. TABLAS Y LISTADOS
+       ========================================================================== */
+    .table-scroll {
+      overflow-x: auto;
+      border-radius: 8px;
+    }
 
- const tmpList = S.tmp.length === 0
-   ? ''
-   : `<div style="margin:10px 0;display:flex;flex-direction:column;gap:6px">${S.tmp.map((h,i)=>{
-       if(S.editTmpIdx===i){
-         return `<div class="row" style="background:var(--item-bg);padding:8px 10px;border-radius:8px;border:1px solid var(--pr);gap:6px">
-           <select id="te_d">${opt(h.dia)}</select>
-           <input type="time" id="te_i" value="${h.ini}">
-           <input type="time" id="te_f" value="${h.fin}">
-           <button class="p" type="button" onclick="saveEditTmp(${i})">Guardar</button>
-           <button type="button" onclick="cancelEditTmp()">Cancelar</button>
-         </div>`;
-       }
-       return `<div class="row sp" style="background:var(--item-bg);padding:8px 12px;border-radius:8px;border:1px solid var(--bd)">
-         <div><b>${DIAS[h.dia]}</b> <span class="mu" style="margin-left:8px">${h.ini}–${h.fin}</span></div>
-         <div class="row" style="gap:6px">
-           <button type="button" onclick="startEditTmp(${i})">Editar</button>
-           <button type="button" class="d" onclick="delTmp(${i})">Eliminar</button>
-         </div>
-       </div>`;
-     }).join('')}</div>`;
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
 
- let h=`<div class="card"><h2>Nuevo grupo</h2><div class="row"><div style="flex:1.2;min-width:160px"><label>Grupo / carrera</label><input id="gc" placeholder="Ingeniería de Sistemas" value="${e(S.newCarrera||'')}" oninput="S.newCarrera=this.value" style="width:100%"></div><div style="flex:1.2;min-width:160px"><label>Asignatura / materia</label><input id="gm" placeholder="Programación Web" value="${e(S.newMateria||'')}" oninput="S.newMateria=this.value" style="width:100%"></div><div style="flex:1;min-width:120px"><label>Jornada</label><input id="gj" placeholder="Nocturna 1" value="${e(S.newJornada||'')}" oninput="S.newJornada=this.value" style="width:100%"></div></div>
- <label style="margin-top:12px">Horario (agrega cada día de clase)</label><div class="row">${sch('g')}<button type="button" onclick="addTmp()">Agregar día</button></div>
- ${tmpList}<button class="p" style="margin-top:8px" onclick="createGroup()">Crear grupo</button></div>`;
+    th, td {
+      padding: 9px 12px;
+      border-bottom: 1px solid var(--bd);
+      text-align: left;
+    }
 
- if(g){
-   const gList = g.horario.length === 0
-     ? '<p class="mu" style="margin:8px 0;font-size:13px">Sin horarios asignados.</p>'
-     : `<div style="margin:8px 0;display:flex;flex-direction:column;gap:6px">${g.horario.map((x,i)=>{
-         if(S.editSchedIdx===i){
-           return `<div class="row" style="background:var(--item-bg);padding:8px 10px;border-radius:8px;border:1px solid var(--pr);gap:6px">
-             <select id="he_d">${opt(x.dia)}</select>
-             <input type="time" id="he_i" value="${x.ini}">
-             <input type="time" id="he_f" value="${x.fin}">
-             <button class="p" type="button" onclick="saveEditSched(${i})">Guardar</button>
-             <button type="button" onclick="cancelEditSched()">Cancelar</button>
-           </div>`;
-         }
-         return `<div class="row sp" style="background:var(--item-bg);padding:8px 12px;border-radius:8px;border:1px solid var(--bd)">
-           <div><b>${DIAS[x.dia]}</b> <span class="mu" style="margin-left:8px">${x.ini}–${x.fin}</span></div>
-           <div class="row" style="gap:6px">
-             <button type="button" onclick="startEditSched(${i})">Editar</button>
-             <button type="button" class="d" onclick="delSched(${i})">Eliminar</button>
-           </div>
-         </div>`;
-       }).join('')}</div>`;
+    th {
+      font-size: 13px;
+      color: var(--mu);
+      font-weight: 600;
+      white-space: nowrap;
+    }
 
-   const sq = (S.stuQ || '').toLowerCase().trim();
-   const listStudents = g.students.filter(s => !sq || s.id.toLowerCase().includes(sq) || s.nombre.toLowerCase().includes(sq));
+    td {
+      white-space: normal;
+      word-break: break-word;
+    }
 
-   h+=`<div class="card"><div class="row sp"><h2>${e(g.carrera)}${g.materia ? ' · ' + e(g.materia) : ''} · ${e(g.jornada)}</h2><button class="d" onclick="delGroup()">Eliminar grupo</button></div>
-   <label>Horario</label>
-   ${gList}
-   <div class="row" style="margin-top:8px">${sch('h')}<button type="button" onclick="addSched()">Agregar día</button></div>
-   <h2 style="margin-top:16px">Estudiantes (${g.students.length})</h2><div class="row"><input id="si" placeholder="Identificador"><input id="sn" placeholder="Nombre completo" style="flex:1"><button class="p" onclick="addStu()">Agregar</button></div>
-   <label style="margin-top:10px">O pega varios (una línea por estudiante: id, nombre)</label><textarea id="sb" rows="3" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--tx)"></textarea><button onclick="bulk()" style="margin-top:6px">Importar lista</button>
-   <div class="row sp" style="margin-top:16px;margin-bottom:6px">
-     <label style="margin:0;font-size:13px;font-weight:600">Listado de estudiantes (${listStudents.length}${sq?` de ${g.students.length}`:''})</label>
-     <input placeholder="Buscar por id o nombre" value="${e(S.stuQ||'')}" oninput="S.stuQ=this.value;render();const i=document.getElementById('sq');i&&(i.focus(),i.setSelectionRange(99,99))" id="sq" style="max-width:240px;padding:6px 10px;font-size:13px">
-   </div>
-   <div class="sc" style="margin-top:6px"><table>${listStudents.map(s=>`<tr><td style="font-family:monospace;width:140px">${e(s.id)}</td><td>${e(s.nombre)}</td><td style="width:50px;text-align:right"><button class="d" onclick="delStu('${e(s.id)}')" title="Quitar estudiante">✕</button></td></tr>`).join('')}</table>${!listStudents.length?`<p class="mu" style="margin:10px 0;font-size:13px">No se encontraron estudiantes para "${e(S.stuQ)}".</p>`:''}</div></div>`;
- }
- return h}
+    td.center, th.center {
+      text-align: center;
+    }
 
-function render(){
- if(!S.user){$('app').innerHTML=authV();return}
- if(groups())groups().forEach(g=>sortStudents(g));
- const T=[['grupos','Grupos'],['asistencia','Asistencia'],['historico','Histórico'],['dashboard','Dashboard']];
- if(!cur()&&groups().length){S.gid=groups()[0].id;S.carrera=groups()[0].carrera;S.materia=groups()[0].materia||''}
- const has=!!cur();if(!has)S.tab='grupos';
- $('app').innerHTML=`<div class="row sp" style="margin-bottom:12px"><h1>Asistencia</h1><div class="row"><button type="button" onclick="toggleTheme()" title="Cambiar tema">${themeBtn()}</button><span class="mu">${e(S.user)}</span><button onclick="logout()">Salir</button></div></div>
- <div class="tabs">${T.map(([k,l])=>`<button class="${S.tab===k?'on':''}" onclick="S.tab='${k}';S.calOpen=false;render()">${l}</button>`).join('')}</div>
- ${has?selV():''}${S.tab==='grupos'?gruposV():S.tab==='asistencia'&&has?asisV():S.tab==='historico'&&has?histV():dashV()}`}
-setInterval(()=>sched(0),60000);addEventListener('online',()=>sched(0));
-document.addEventListener('click',e=>{if(S.calOpen&&!e.target.closest('#cal-box')&&!e.target.closest('#cal-toggle-btn')){S.calOpen=false;render()}});
-render();
-</script></body></html>
+    .color-ok {
+      color: var(--ok);
+      font-weight: 600;
+    }
+
+    .color-ko {
+      color: var(--ko);
+      font-weight: 600;
+    }
+
+    .color-mu {
+      color: var(--mu);
+    }
+
+    .msg-error {
+      color: var(--ko);
+      font-size: 13px;
+      margin: 8px 0;
+    }
+
+    /* ==========================================================================
+       6. BADGES, KPI Y BARRAS DE PROGRESO
+       ========================================================================== */
+    .pill {
+      padding: 4px 12px;
+      border-radius: 99px;
+      border: 1px solid var(--bd);
+      font-size: 13px;
+      font-weight: 500;
+      background: var(--item-bg);
+      color: var(--tx);
+      cursor: pointer;
+    }
+
+    .pill.pill-ok {
+      background: var(--ok);
+      color: #ffffff;
+      border-color: var(--ok);
+    }
+
+    .pill.pill-ko {
+      background: var(--ko);
+      color: #ffffff;
+      border-color: var(--ko);
+    }
+
+    .kpi {
+      flex: 1;
+      min-width: 130px;
+      text-align: center;
+      padding: 16px;
+    }
+
+    .kpi b {
+      display: block;
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .progress-bar {
+      display: flex;
+      height: 14px;
+      border-radius: 7px;
+      overflow: hidden;
+      background: var(--bd);
+      min-width: 120px;
+      flex: 1;
+    }
+
+    .progress-bar i {
+      display: block;
+      height: 100%;
+    }
+
+    /* ==========================================================================
+       7. CALENDARIO PERSONALIZADO
+       ========================================================================== */
+    #cal-box {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 6px);
+      z-index: 200;
+      background: var(--card);
+      border: 1px solid var(--bd);
+      border-radius: 12px;
+      padding: 12px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+      width: 290px;
+    }
+
+    .cal-day-cell {
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      border-radius: 6px;
+    }
+
+    .cal-day-disabled {
+      color: var(--mu);
+      opacity: 0.25;
+      user-select: none;
+    }
+
+    .cal-day-active {
+      cursor: pointer;
+      font-weight: 500;
+      border: 1px solid var(--bd);
+      background: var(--item-bg);
+      color: var(--tx);
+    }
+
+    .cal-day-active.selected {
+      background: var(--pr);
+      color: #ffffff;
+      border-color: var(--pr);
+      font-weight: 700;
+    }
+
+    .cal-day-active.has-records {
+      background: rgba(0, 128, 0, 0.12);
+      border-color: var(--ok);
+      color: var(--ok);
+    }
+  </style>
+</head>
+<body>
+  <div class="container" id="app"></div>
+
+  <script>
+    /* ==========================================================================
+       1. CONSTANTES, ICONOS Y UTILIDADES
+       ========================================================================== */
+    const DIAS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+    const MESES = [
+      'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+      'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
+    ];
+
+    const EYE_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+    const EYE_OFF_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
+    const SUN_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>`;
+    const MOON_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`;
+    const DOWNLOAD_ICON = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+    const UPLOAD_ICON = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>`;
+
+    const $ = id => document.getElementById(id);
+    const today = () => new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+    const iso = () => new Date().toISOString();
+    const uid = () => crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random() * 16 | 0;
+      return (c === 'x' ? r : (r & 3 | 8)).toString(16);
+    });
+    const e = s => String(s ?? '').replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+    async function hash(em, p) {
+      const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(em + ':' + p));
+      return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+    }
+
+    /* ==========================================================================
+       2. TEMA VISUAL (CLARO / OSCURO)
+       ========================================================================== */
+    let currentTheme = 'light';
+    try {
+      currentTheme = localStorage.getItem('asist_theme') || 'light';
+    } catch (_) {}
+
+    function applyTheme(th) {
+      currentTheme = th;
+      document.documentElement.setAttribute('data-theme', th);
+      try { localStorage.setItem('asist_theme', th); } catch (_) {}
+    }
+
+    function toggleTheme() {
+      applyTheme(currentTheme === 'dark' ? 'light' : 'dark');
+      render();
+    }
+
+    const themeBtn = () => currentTheme === 'dark'
+      ? `<span style="display:inline-flex;align-items:center;gap:6px">${SUN_ICON} Modo claro</span>`
+      : `<span style="display:inline-flex;align-items:center;gap:6px">${MOON_ICON} Modo oscuro</span>`;
+
+    applyTheme(currentTheme);
+
+    /* ==========================================================================
+       3. CAPA DE PERSISTENCIA LOCAL (REPO)
+       ========================================================================== */
+    const Repo = {
+      load() {
+        try {
+          return JSON.parse(localStorage.getItem('asist_v2')) || { users: {}, data: {} };
+        } catch (_) {
+          return { users: {}, data: {} };
+        }
+      },
+      save(db) {
+        try {
+          localStorage.setItem('asist_v2', JSON.stringify(db));
+        } catch (_) {}
+      }
+    };
+
+    let DB = Repo.load();
+
+    /* ==========================================================================
+       4. CONECTIVIDAD API & RESOLUCIÓN MULTIDISPOSITIVO
+       ========================================================================== */
+    let API_OVERRIDE = '';
+    try {
+      API_OVERRIDE = localStorage.getItem('asist_api') || '';
+    } catch (_) {}
+
+    function getApiBase() {
+      if (API_OVERRIDE && API_OVERRIDE.trim()) {
+        return API_OVERRIDE.trim().replace(/\/$/, '');
+      }
+      if (typeof window !== 'undefined' && window.location) {
+        const proto = window.location.protocol;
+        if (proto === 'http:' || proto === 'https:') {
+          return window.location.origin;
+        }
+      }
+      return 'http://localhost:5000';
+    }
+
+    async function api(method, path, body, token) {
+      const base = getApiBase();
+      try {
+        const res = await fetch(base + path, {
+          method,
+          signal: AbortSignal.timeout(8000),
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': 'Bearer ' + token } : {})
+          },
+          body: body ? JSON.stringify(body) : undefined
+        });
+        let json = null;
+        try { json = await res.json(); } catch (_) {}
+        return { ok: res.ok, status: res.status, body: json };
+      } catch (err) {
+        return { net: true, error: err };
+      }
+    }
+
+    /* ==========================================================================
+       5. ESTADO GLOBAL DE LA APLICACIÓN
+       ========================================================================== */
+    const qParams = new URLSearchParams(window.location.search);
+    const initToken = qParams.get('token');
+    const initEmail = qParams.get('email');
+
+    const S = {
+      user: null,
+      mode: (initToken && initEmail) ? 'reset' : 'login',
+      resetToken: initToken || '',
+      resetEmail: initEmail || '',
+      recEmail: '',
+      recSent: false,
+      recLink: '',
+      err: '',
+      tab: 'grupos', // Pestañas: Grupos, Asistencia, Histórico, Dashboard
+      carrera: '',
+      materia: '',
+      gid: '',
+      date: today(),
+      month: today().slice(0, 7),
+      fdate: '',
+      fst: 'todos',
+      q: '',        // Búsqueda en Dashboard
+      stuQ: '',     // Búsqueda en Grupos
+      asisQ: '',    // Búsqueda en Asistencia
+      calOpen: false,
+      calMonth: '',
+      tmp: [],
+      editTmpIdx: -1,
+      editSchedIdx: -1,
+      newCarrera: '',
+      newMateria: '',
+      newJornada: ''
+    };
+
+    const groups = () => (S.user && DB.data[S.user]) ? DB.data[S.user].groups : [];
+    const cur = () => groups().find(g => g.id === S.gid);
+    const SY = () => {
+      if (!S.user || !DB.data[S.user]) return { token: '', since: '1970-01-01T00:00:00.000Z', pushed: '', tomb: [] };
+      return (DB.data[S.user].sync = DB.data[S.user].sync || {
+        token: '',
+        since: '1970-01-01T00:00:00.000Z',
+        pushed: '',
+        tomb: []
+      });
+    };
+
+    const save = () => {
+      Repo.save(DB);
+      if (S.user) sched();
+    };
+
+    /* ==========================================================================
+       6. MOTOR DE SINCRONIZACIÓN (MULTI-DISPOSITIVO LAST-WRITE-WINS)
+       ========================================================================== */
+    let syncBusy = false;
+    let syncAgain = false;
+    let syncTimer = null;
+
+    const sched = (ms = 1200) => {
+      clearTimeout(syncTimer);
+      syncTimer = setTimeout(sync, ms);
+    };
+
+    async function sync() {
+      if (!S.user) return;
+      if (syncBusy) {
+        syncAgain = true;
+        return;
+      }
+      const em = S.user;
+      const D = DB.data[em];
+      const y = SY();
+      if (!y.token) return;
+
+      syncBusy = true;
+      const ini = iso();
+      const nw = t => !y.pushed || t > y.pushed;
+
+      const P = { grupos: [], estudiantes: [], registros: [] };
+
+      D.groups.forEach(g => {
+        if (nw(g.u)) {
+          P.grupos.push({
+            id: g.id,
+            carrera: g.carrera,
+            jornada: g.jornada,
+            materia: g.materia || '',
+            horarios: g.horario.map(h => ({ dia: +h.dia, inicio: h.ini, fin: h.fin })),
+            updatedAt: g.u,
+            deleted: false
+          });
+        }
+        g.students.forEach(s => {
+          if (nw(s.u)) {
+            P.estudiantes.push({
+              id: s.uid,
+              grupoId: g.id,
+              codigo: s.id,
+              nombreCompleto: s.nombre,
+              updatedAt: s.u,
+              deleted: false
+            });
+          }
+          for (const d in g.records) {
+            const v = g.records[d][s.id];
+            const t = (g.ru || {})[d + '|' + s.id];
+            if (v && t && nw(t)) {
+              P.registros.push({
+                id: uid(),
+                estudianteId: s.uid,
+                fecha: d,
+                presente: v === 'P',
+                updatedAt: t,
+                deleted: false
+              });
+            }
+          }
+        });
+      });
+
+      y.tomb.forEach(t => {
+        if (t.t === 'g') {
+          P.grupos.push({ id: t.id, carrera: t.carrera, jornada: t.jornada, materia: t.materia || '', horarios: [], updatedAt: t.u, deleted: true });
+        } else if (t.t === 'e') {
+          P.estudiantes.push({ id: t.uid, grupoId: t.gid, codigo: t.id, nombreCompleto: t.nombre, updatedAt: t.u, deleted: true });
+        } else {
+          P.registros.push({ id: uid(), estudianteId: t.uid, fecha: t.fecha, presente: false, updatedAt: t.u, deleted: true });
+        }
+      });
+
+      // 1. Enviar cambios pendientes al servidor central
+      let r = await api('POST', '/api/sync', P, y.token);
+      if (!r.ok) {
+        syncBusy = false;
+        if (r.status === 401) y.token = '';
+        if (syncAgain) { syncAgain = false; sched(); }
+        return;
+      }
+
+      y.tomb = y.tomb.filter(t => t.u > ini);
+      y.pushed = ini;
+
+      // 2. Traer cambios generados en otros dispositivos
+      r = await api('GET', '/api/sync?since=' + encodeURIComponent(y.since), null, y.token);
+      if (!r.ok) {
+        syncBusy = false;
+        if (r.status === 401) y.token = '';
+        if (syncAgain) { syncAgain = false; sched(); }
+        return;
+      }
+
+      const changed = mergeRemoteData(r.body, D);
+      y.since = new Date(Date.parse(r.body.serverTime) - 3e5).toISOString();
+      Repo.save(DB);
+
+      syncBusy = false;
+
+      // Si se actualizaron datos y el usuario no está escribiendo en un input, re-renderizar
+      if (S.user === em && changed) {
+        const active = document.activeElement;
+        if (!active || !active.matches('input,textarea,select')) {
+          render();
+        }
+      }
+
+      if (syncAgain) {
+        syncAgain = false;
+        sched();
+      }
+    }
+
+    function mergeRemoteData(B, D) {
+      let changed = false;
+      const parseTime = x => Date.parse(x);
+
+      // Sincronizar grupos
+      B.grupos.forEach(x => {
+        let g = D.groups.find(q => q.id === x.id);
+        if (x.deleted) {
+          if (g && parseTime(x.updatedAt) > parseTime(g.u)) {
+            D.groups = D.groups.filter(q => q !== g);
+            changed = true;
+          }
+          return;
+        }
+        if (!g) {
+          D.groups.push(g = {
+            id: x.id, carrera: '', jornada: '', materia: '',
+            horario: [], students: [], records: {}, ru: {}, u: '1970'
+          });
+          changed = true;
+        }
+        if (parseTime(x.updatedAt) > parseTime(g.u)) {
+          g.carrera = x.carrera;
+          g.jornada = x.jornada;
+          g.materia = x.materia || '';
+          g.horario = x.horarios.map(h => ({ dia: h.dia, ini: h.inicio, fin: h.fin }));
+          g.u = x.updatedAt;
+          changed = true;
+        }
+      });
+
+      // Mapear estudiantes
+      const idx = {};
+      D.groups.forEach(g => g.students.forEach(s => idx[s.uid] = [g, s]));
+
+      B.estudiantes.forEach(x => {
+        const g = D.groups.find(q => q.id === x.grupoId);
+        if (!g) return;
+        const f = idx[x.id];
+        if (x.deleted) {
+          if (f && parseTime(x.updatedAt) > parseTime(f[1].u)) {
+            f[0].students = f[0].students.filter(q => q !== f[1]);
+            delete idx[x.id];
+            changed = true;
+          }
+          return;
+        }
+        if (!f) {
+          const s = { uid: x.id, id: x.codigo, nombre: x.nombreCompleto, u: x.updatedAt };
+          g.students.push(s);
+          idx[x.id] = [g, s];
+          changed = true;
+        } else if (parseTime(x.updatedAt) > parseTime(f[1].u)) {
+          f[1].id = x.codigo;
+          f[1].nombre = x.nombreCompleto;
+          f[1].u = x.updatedAt;
+          changed = true;
+        }
+      });
+
+      // Sincronizar registros de asistencia
+      B.registros.forEach(x => {
+        const f = idx[x.estudianteId];
+        if (!f) return;
+        const [g, s] = f;
+        const k = x.fecha + '|' + s.id;
+        g.ru = g.ru || {};
+        if (g.ru[k] && parseTime(x.updatedAt) <= parseTime(g.ru[k])) return;
+
+        g.records[x.fecha] = g.records[x.fecha] || {};
+        if (x.deleted) {
+          delete g.records[x.fecha][s.id];
+        } else {
+          g.records[x.fecha][s.id] = x.presente ? 'P' : 'A';
+        }
+        g.ru[k] = x.updatedAt;
+        changed = true;
+      });
+
+      return changed;
+    }
+
+    /* ==========================================================================
+       7. COPIA DE SEGURIDAD PORTÁTIL (EXPORTAR / IMPORTAR JSON)
+       ========================================================================== */
+    function exportBackup() {
+      if (!S.user || !DB.data[S.user]) return;
+      const dataToExport = {
+        version: 'asistencia_backup_v1',
+        user: S.user,
+        exportedAt: new Date().toISOString(),
+        data: DB.data[S.user]
+      };
+      const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `asistencia_respaldo_${S.user.split('@')[0]}_${today()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function triggerImportBackup() {
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = '.json,application/json';
+      fileInput.onchange = e => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = evt => {
+          try {
+            const parsed = JSON.parse(evt.target.result);
+            if (!parsed || (!parsed.data && !parsed.groups)) {
+              return alert('El archivo no contiene un formato de respaldo válido.');
+            }
+            const incomingData = parsed.data || parsed;
+            if (!incomingData.groups || !Array.isArray(incomingData.groups)) {
+              return alert('Estructura de datos de respaldo incorrecta.');
+            }
+            if (confirm('¿Deseas restaurar esta copia de seguridad? Se integrarán los grupos y asistencias a tu cuenta.')) {
+              DB.data[S.user] = DB.data[S.user] || { groups: [] };
+              // Marcar todos los elementos entrantes como actualizados para forzar su sincronización
+              incomingData.groups.forEach(g => {
+                g.u = iso();
+                (g.students || []).forEach(st => st.u = iso());
+              });
+              DB.data[S.user] = incomingData;
+              Repo.save(DB);
+              if (groups().length > 0) {
+                S.gid = groups()[0].id;
+                S.carrera = groups()[0].carrera;
+                S.materia = groups()[0].materia || '';
+              }
+              save();
+              render();
+              alert('¡Copia de respaldo restaurada con éxito!');
+            }
+          } catch (err) {
+            alert('Error al leer el archivo de respaldo: ' + err.message);
+          }
+        };
+        reader.readAsText(file);
+      };
+      fileInput.click();
+    }
+
+    /* ==========================================================================
+       8. GESTIÓN DE HORARIOS Y PREVENCIÓN DE CONFLICTOS
+       ========================================================================== */
+    function syncNewInputs() {
+      const gc = $('gc'), gj = $('gj'), gm = $('gm');
+      if (gc) S.newCarrera = gc.value;
+      if (gj) S.newJornada = gj.value;
+      if (gm) S.newMateria = gm.value;
+    }
+
+    function checkSchedConflict(d, ini, fin, opts = {}) {
+      const diaNum = +d;
+      // 1. Validar contra horarios temporales del formulario
+      if (opts.checkTmp && S.tmp) {
+        for (let idx = 0; idx < S.tmp.length; idx++) {
+          if (opts.ignoreTmpIdx !== undefined && opts.ignoreTmpIdx === idx) continue;
+          const h = S.tmp[idx];
+          if (+h.dia === diaNum && ini < h.fin && fin > h.ini) {
+            return `Conflicto de horario: Ya agregaste una clase el ${DIAS[diaNum]} de ${h.ini} a ${h.fin} en este nuevo grupo. Registra otro horario.`;
+          }
+        }
+      }
+
+      // 2. Validar contra todos los grupos creados
+      const allGroups = groups();
+      for (const g of allGroups) {
+        const isCur = opts.currentGroupId && g.id === opts.currentGroupId;
+        for (let idx = 0; idx < g.horario.length; idx++) {
+          if (isCur && opts.currentSchedIdx !== undefined && opts.currentSchedIdx === idx) continue;
+          const h = g.horario[idx];
+          if (+h.dia === diaNum && ini < h.fin && fin > h.ini) {
+            const gName = [g.carrera, g.materia, g.jornada].filter(Boolean).join(' · ');
+            if (isCur) {
+              return `Conflicto de horario: Este grupo ya tiene una clase programada el ${DIAS[diaNum]} de ${h.ini} a ${h.fin}. Registra otro horario.`;
+            } else {
+              return `Conflicto de horario: Ya existe una clase en el grupo "${gName}" el ${DIAS[diaNum]} de ${h.ini} a ${h.fin}. Por favor registra otro horario.`;
+            }
+          }
+        }
+      }
+      return null;
+    }
+
+    function addTmp() {
+      syncNewInputs();
+      const d = $('gd').value, i = $('gi').value, f = $('gf').value;
+      if (!i || !f) return alert('Selecciona hora de inicio y fin.');
+      if (i >= f) return alert('La hora de inicio debe ser anterior a la hora de fin.');
+      const err = checkSchedConflict(d, i, f, { checkTmp: true });
+      if (err) return alert(err);
+      S.tmp.push({ dia: d, ini: i, fin: f });
+      render();
+    }
+
+    function delTmp(i) {
+      syncNewInputs();
+      S.tmp.splice(i, 1);
+      if (S.editTmpIdx === i) S.editTmpIdx = -1;
+      else if (S.editTmpIdx > i) S.editTmpIdx--;
+      render();
+    }
+
+    function startEditTmp(i) {
+      syncNewInputs();
+      S.editTmpIdx = i;
+      render();
+    }
+
+    function cancelEditTmp() {
+      syncNewInputs();
+      S.editTmpIdx = -1;
+      render();
+    }
+
+    function saveEditTmp(i) {
+      syncNewInputs();
+      const d = $('te_d').value, ini = $('te_i').value, fin = $('te_f').value;
+      if (!ini || !fin) return alert('Selecciona hora de inicio y fin.');
+      if (ini >= fin) return alert('La hora de inicio debe ser anterior a la hora de fin.');
+      const err = checkSchedConflict(d, ini, fin, { checkTmp: true, ignoreTmpIdx: i });
+      if (err) return alert(err);
+      S.tmp[i] = { dia: d, ini, fin };
+      S.editTmpIdx = -1;
+      render();
+    }
+
+    function createGroup() {
+      syncNewInputs();
+      const c = S.newCarrera.trim(), j = S.newJornada.trim(), m = S.newMateria.trim();
+      if (!c || !m || !j) return alert('Escribe el grupo/carrera, la asignatura/materia y la jornada.');
+      for (const h of S.tmp) {
+        const err = checkSchedConflict(h.dia, h.ini, h.fin);
+        if (err) return alert(err);
+      }
+      const g = {
+        id: uid(),
+        carrera: c,
+        materia: m,
+        jornada: j,
+        horario: S.tmp,
+        students: [],
+        records: {},
+        ru: {},
+        u: iso()
+      };
+      groups().push(g);
+      S.tmp = [];
+      S.newCarrera = '';
+      S.newMateria = '';
+      S.newJornada = '';
+      S.editTmpIdx = -1;
+      S.carrera = c;
+      S.materia = m;
+      S.gid = g.id;
+      save();
+      render();
+    }
+
+    function delGroup() {
+      if (confirm('¿Eliminar este grupo y todo su histórico?')) {
+        const g0 = cur();
+        SY().tomb.push({ t: 'g', id: g0.id, carrera: g0.carrera, jornada: g0.jornada, materia: g0.materia || '', u: iso() });
+        DB.data[S.user].groups = groups().filter(g => g.id !== S.gid);
+        S.gid = groups()[0]?.id || '';
+        S.carrera = groups()[0]?.carrera || '';
+        S.materia = groups()[0]?.materia || '';
+        save();
+        render();
+      }
+    }
+
+    function addSched() {
+      const g = cur();
+      if (!g) return;
+      const d = $('hd').value, i = $('hi').value, f = $('hf').value;
+      if (!i || !f) return alert('Selecciona hora de inicio y fin.');
+      if (i >= f) return alert('La hora de inicio debe ser anterior a la hora de fin.');
+      const err = checkSchedConflict(d, i, f, { currentGroupId: g.id });
+      if (err) return alert(err);
+      g.horario.push({ dia: d, ini: i, fin: f });
+      g.u = iso();
+      save();
+      render();
+    }
+
+    function delSched(i) {
+      const g = cur();
+      if (!g) return;
+      if (!confirm('¿Eliminar este horario?')) return;
+      g.horario.splice(i, 1);
+      if (S.editSchedIdx === i) S.editSchedIdx = -1;
+      else if (S.editSchedIdx > i) S.editSchedIdx--;
+      g.u = iso();
+      save();
+      render();
+    }
+
+    function startEditSched(i) {
+      S.editSchedIdx = i;
+      render();
+    }
+
+    function cancelEditSched() {
+      S.editSchedIdx = -1;
+      render();
+    }
+
+    function saveEditSched(i) {
+      const g = cur();
+      if (!g) return;
+      const d = $('he_d').value, ini = $('he_i').value, fin = $('he_f').value;
+      if (!ini || !fin) return alert('Selecciona hora de inicio y fin.');
+      if (ini >= fin) return alert('La hora de inicio debe ser anterior a la hora de fin.');
+      const err = checkSchedConflict(d, ini, fin, { currentGroupId: g.id, currentSchedIdx: i });
+      if (err) return alert(err);
+      g.horario[i] = { dia: d, ini, fin };
+      g.u = iso();
+      S.editSchedIdx = -1;
+      save();
+      render();
+    }
+
+    /* ==========================================================================
+       9. GESTIÓN DE ESTUDIANTES Y ORDENAMIENTO ALFABÉTICO
+       ========================================================================== */
+    function sortStudents(g) {
+      if (g && Array.isArray(g.students)) {
+        g.students.sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es', { sensitivity: 'base' }));
+      }
+    }
+
+    function addStu() {
+      const g = cur();
+      if (!g) return;
+      const id = $('si').value.trim();
+      const n = $('sn').value.trim();
+      if (!id || !n) return alert('Ingresa el identificador y el nombre completo del estudiante.');
+      if (g.students.some(s => s.id === id)) return alert('Ya existe un estudiante con ese identificador.');
+      g.students.push({ uid: uid(), id, nombre: n, u: iso() });
+      sortStudents(g);
+      save();
+      render();
+    }
+
+    function bulk() {
+      const g = cur();
+      if (!g) return;
+      const lines = $('sb').value.split('\n');
+      lines.forEach(l => {
+        const [i, ...n] = l.split(/[,;\t]/);
+        const id = (i || '').trim();
+        const nm = n.join(' ').trim();
+        if (id && nm && !g.students.some(s => s.id === id)) {
+          g.students.push({ uid: uid(), id, nombre: nm, u: iso() });
+        }
+      });
+      sortStudents(g);
+      save();
+      render();
+    }
+
+    function delStu(idOrIdx) {
+      if (confirm('¿Quitar estudiante?')) {
+        const g = cur();
+        if (!g) return;
+        const idx = typeof idOrIdx === 'string' ? g.students.findIndex(x => x.id === idOrIdx) : idOrIdx;
+        if (idx < 0 || idx >= g.students.length) return;
+        const s = g.students[idx];
+        SY().tomb.push({ t: 'e', uid: s.uid, gid: g.id, id: s.id, nombre: s.nombre, u: iso() });
+        g.students.splice(idx, 1);
+        save();
+        render();
+      }
+    }
+
+    /* ==========================================================================
+       10. REGISTRO DE ASISTENCIA Y ESTADÍSTICAS
+       ========================================================================== */
+    function mark(idOrIdx, v) {
+      const g = cur();
+      if (!g) return;
+      const s = typeof idOrIdx === 'string' ? g.students.find(x => x.id === idOrIdx) : g.students[idOrIdx];
+      if (!s) return;
+      g.records[S.date] = g.records[S.date] || {};
+      g.ru = g.ru || {};
+      if (g.records[S.date][s.id] === v) {
+        delete g.records[S.date][s.id];
+        if (Object.keys(g.records[S.date]).length === 0) delete g.records[S.date];
+        SY().tomb.push({ t: 'r', uid: s.uid, fecha: S.date, u: iso() });
+      } else {
+        g.records[S.date][s.id] = v;
+      }
+      g.ru[S.date + '|' + s.id] = iso();
+      save();
+      render();
+    }
+
+    function stats(g, s) {
+      let p = 0, a = 0;
+      for (const d in g.records) {
+        const v = g.records[d][s.id];
+        if (v === 'P') p++;
+        else if (v === 'A') a++;
+      }
+      return { p, a };
+    }
+
+    function classDates(g, m) {
+      const [y, mo] = m.split('-').map(Number);
+      const n = new Date(y, mo, 0).getDate();
+      const s = new Set();
+      for (let d = 1; d <= n; d++) {
+        if (g.horario.some(h => +h.dia === new Date(y, mo - 1, d).getDay())) {
+          s.add(`${m}-${String(d).padStart(2, '0')}`);
+        }
+      }
+      Object.keys(g.records).forEach(k => k.startsWith(m) && s.add(k));
+      return [...s].sort();
+    }
+
+    const fmt = d => {
+      const [y, m, x] = d.split('-');
+      return `${DIAS[new Date(y, m - 1, x).getDay()].slice(0, 3)} ${+x}`;
+    };
+
+    const horTxt = g => g.horario.length
+      ? g.horario.map(h => `${DIAS[h.dia]} ${h.ini}–${h.fin}`).join(' · ')
+      : 'Sin horario';
+
+    /* ==========================================================================
+       11. COMPONENTE DE CALENDARIO EXCLUSIVO PARA DÍAS DE CLASE
+       ========================================================================== */
+    function getNearestClassDate(g, refDateStr = today()) {
+      if (!g || !g.horario || !g.horario.length) return refDateStr;
+      const daysSet = new Set(g.horario.map(h => +h.dia));
+      const curD = new Date(refDateStr + 'T00:00');
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(curD);
+        d.setDate(d.getDate() - i);
+        if (daysSet.has(d.getDay())) return d.toISOString().slice(0, 10);
+      }
+      for (let i = 1; i <= 7; i++) {
+        const d = new Date(curD);
+        d.setDate(d.getDate() + i);
+        if (daysSet.has(d.getDay())) return d.toISOString().slice(0, 10);
+      }
+      return refDateStr;
+    }
+
+    function ensureValidClassDate(g) {
+      if (!g || !g.horario || !g.horario.length) return;
+      const daysSet = new Set(g.horario.map(h => +h.dia));
+      const curD = new Date(S.date + 'T00:00');
+      if (!daysSet.has(curD.getDay())) {
+        S.date = getNearestClassDate(g, today());
+        S.calMonth = S.date.slice(0, 7);
+      }
+    }
+
+    function stepClassDate(dir) {
+      const g = cur();
+      if (!g || !g.horario || !g.horario.length) return;
+      const daysSet = new Set(g.horario.map(h => +h.dia));
+      let d = new Date(S.date + 'T00:00');
+      for (let i = 0; i < 60; i++) {
+        d.setDate(d.getDate() + dir);
+        if (daysSet.has(d.getDay())) {
+          S.date = d.toISOString().slice(0, 10);
+          S.calMonth = S.date.slice(0, 7);
+          render();
+          return;
+        }
+      }
+    }
+
+    function pickClassDate(dStr) {
+      S.date = dStr;
+      S.calMonth = dStr.slice(0, 7);
+      S.calOpen = false;
+      render();
+    }
+
+    function changeCalMonth(delta) {
+      if (!S.calMonth) S.calMonth = S.date.slice(0, 7);
+      const [y, m] = S.calMonth.split('-').map(Number);
+      const d = new Date(y, m - 1 + delta, 1);
+      S.calMonth = d.toISOString().slice(0, 7);
+      render();
+    }
+
+    function calV(g) {
+      if (!S.calOpen) return '';
+      if (!S.calMonth) S.calMonth = S.date.slice(0, 7);
+      const [y, m] = S.calMonth.split('-').map(Number);
+      const firstDay = new Date(y, m - 1, 1).getDay();
+      const daysInMonth = new Date(y, m, 0).getDate();
+      const daysSet = new Set(g.horario.map(h => +h.dia));
+      const D_HEADERS = ['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sa'];
+
+      const cells = [];
+      for (let i = 0; i < firstDay; i++) {
+        cells.push('<div class="cal-day-cell"></div>');
+      }
+
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dStr = y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+        const dayOfWeek = (firstDay + d - 1) % 7;
+        const isClass = daysSet.has(dayOfWeek);
+        const isSel = dStr === S.date;
+        const rec = g.records && g.records[dStr];
+        const hasTaken = rec && Object.keys(rec).length > 0;
+
+        if (isClass) {
+          const cls = ['cal-day-cell', 'cal-day-active'];
+          if (isSel) cls.push('selected');
+          else if (hasTaken) cls.push('has-records');
+          const title = isSel ? 'Fecha actual seleccionada' : hasTaken ? 'Asistencia registrada' : 'Día de clase programado';
+          cells.push(`<button type="button" class="${cls.join(' ')}" onclick="pickClassDate('${dStr}')" title="${title}">${d}${hasTaken && !isSel ? ' •' : ''}</button>`);
+        } else {
+          cells.push(`<div class="cal-day-cell cal-day-disabled" title="No hay clase este día">${d}</div>`);
+        }
+      }
+
+      const schedNames = g.horario.map(h => DIAS[h.dia]).filter((v, i, a) => a.indexOf(v) === i).join(', ');
+
+      return `
+        <div id="cal-box">
+          <div class="row row-sp" style="margin-bottom:8px">
+            <button type="button" onclick="changeCalMonth(-1)" style="padding:4px 8px;font-size:14px">‹</button>
+            <b style="text-transform:capitalize;font-size:14px">${MESES[m - 1]} ${y}</b>
+            <button type="button" onclick="changeCalMonth(1)" style="padding:4px 8px;font-size:14px">›</button>
+          </div>
+          <div style="font-size:11px;color:var(--mu);margin-bottom:8px;text-align:center">
+            Días de clase: <b style="color:var(--tx)">${e(schedNames)}</b>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;font-size:11px;font-weight:600;margin-bottom:4px">
+            ${D_HEADERS.map((dh, idx) => `<span style="color:${daysSet.has(idx) ? 'var(--pr)' : 'var(--mu)'}">${dh}</span>`).join('')}
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">
+            ${cells.join('')}
+          </div>
+          <div class="row row-sp" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--bd)">
+            <button type="button" onclick="pickClassDate(getNearestClassDate(cur(),today()))" style="font-size:12px;padding:4px 8px">Hoy / más reciente</button>
+            <button type="button" onclick="S.calOpen=false;render()" style="font-size:12px;padding:4px 8px">Cerrar</button>
+          </div>
+        </div>
+      `;
+    }
+
+    /* ==========================================================================
+       12. CONTROLADOR DE AUTENTICACIÓN Y RECUPERACIÓN
+       ========================================================================== */
+    function fail(m) {
+      S.err = m;
+      render();
+    }
+
+    function togglePw(id = 'pw', btnId = 'eye-btn') {
+      const p = $(id), b = $(btnId);
+      if (!p) return;
+      const isPw = p.type === 'password';
+      p.type = isPw ? 'text' : 'password';
+      if (b) {
+        b.innerHTML = isPw ? EYE_OFF_ICON : EYE_ICON;
+        b.title = isPw ? 'Ocultar contraseña' : 'Mostrar contraseña';
+      }
+    }
+
+    async function auth() {
+      const em = $('em').value.trim().toLowerCase();
+      const pw = $('pw').value;
+      const reg = S.mode === 'reg';
+
+      if (!/^[a-z0-9._+-]+@gmail\.com$/.test(em)) {
+        return fail('Usa un correo Gmail válido (@gmail.com).');
+      }
+      if (reg && !/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/.test(pw)) {
+        return fail('La contraseña debe tener mínimo 8 caracteres, con mayúsculas, minúsculas y números.');
+      }
+
+      const lh = await hash(em, pw);
+      let tok = '';
+
+      // Llamada al backend
+      const r = await api('POST', '/api/auth/' + (reg ? 'register' : 'login'), { email: em, password: pw }, '');
+
+      if (r.net) {
+        // Modo local sin conexión o backend local
+        if (reg) {
+          if (DB.users[em]) return fail('Ese correo ya está registrado.');
+        } else {
+          if (DB.users[em] !== lh) return fail('Correo o contraseña incorrectos.');
+        }
+      } else if (r.ok) {
+        tok = r.body.token;
+      } else if (!reg && r.status === 401 && DB.users[em] === lh) {
+        // Caso de cuenta creada previamente offline cuando el backend no estaba activo
+        const r2 = await api('POST', '/api/auth/register', { email: em, password: pw }, '');
+        if (r2.ok) tok = r2.body.token;
+      } else {
+        return fail(r.body?.error || 'No se pudo iniciar sesión.');
+      }
+
+      DB.users[em] = lh;
+      DB.data[em] = DB.data[em] || { groups: [] };
+      S.user = em;
+      SY().token = tok;
+      Repo.save(DB);
+
+      // Traer inmediatamente los datos del servidor central antes de renderizar
+      if (tok) {
+        try {
+          await sync();
+        } catch (_) {}
+      }
+
+      S.err = '';
+      const gs = groups();
+      if (gs && gs.length > 0) {
+        S.gid = gs[0].id;
+        S.carrera = gs[0].carrera || '';
+        S.materia = gs[0].materia || '';
+      } else {
+        S.gid = '';
+        S.carrera = '';
+        S.materia = '';
+      }
+      S.tab = 'grupos';
+      render();
+    }
+
+    function logout() {
+      if (S.user) {
+        SY().token = '';
+        Repo.save(DB);
+      }
+      S.user = null;
+      render();
+    }
+
+    async function sendRecoveryEmail() {
+      const em = ($('em')?.value || '').trim().toLowerCase();
+      if (!/^[a-z0-9._+-]+@gmail\.com$/.test(em)) {
+        return fail('Usa un correo Gmail válido (@gmail.com).');
+      }
+      S.err = '';
+      const tok = uid();
+      let link = window.location.origin + window.location.pathname + '?token=' + tok + '&email=' + encodeURIComponent(em);
+
+      const r = await api('POST', '/api/auth/forgot-password', { email: em }, '');
+      if (r.net) {
+        if (!DB.users[em]) return fail('No se encontró una cuenta registrada con ese correo.');
+        DB.tokens = DB.tokens || {};
+        DB.tokens[tok] = { email: em, exp: Date.now() + 3600000 };
+        Repo.save(DB);
+      } else if (r.ok) {
+        if (r.body?.link) link = r.body.link;
+      } else {
+        return fail(r.body?.error || 'No se pudo generar el enlace de recuperación.');
+      }
+      S.recEmail = em;
+      S.recLink = link;
+      S.recSent = true;
+      render();
+    }
+
+    function openResetLink(link) {
+      window.location.href = link;
+    }
+
+    function cleanUrlAndLogin() {
+      try { history.replaceState(null, '', window.location.pathname); } catch (_) {}
+      S.mode = 'login';
+      S.resetToken = '';
+      S.resetEmail = '';
+      S.recSent = false;
+      S.err = '';
+      render();
+    }
+
+    async function submitNewPassword() {
+      const pw = ($('pw')?.value || '');
+      if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/.test(pw)) {
+        return fail('La nueva contraseña debe tener mínimo 8 caracteres con mayúsculas, minúsculas y números.');
+      }
+      const em = S.resetEmail, tok = S.resetToken;
+      const r = await api('POST', '/api/auth/reset-with-token', { email: em, token: tok, newPassword: pw }, '');
+      const lh = await hash(em, pw);
+      if (r.net) {
+        DB.tokens = DB.tokens || {};
+        const t = DB.tokens[tok];
+        if (!t || t.email !== em || t.exp < Date.now()) {
+          return fail('El enlace de recuperación es inválido o ha expirado.');
+        }
+        DB.users[em] = lh;
+        delete DB.tokens[tok];
+        Repo.save(DB);
+      } else if (r.ok) {
+        DB.users[em] = lh;
+        Repo.save(DB);
+      } else {
+        return fail(r.body?.error || 'No se pudo restablecer la contraseña.');
+      }
+      alert('¡Contraseña actualizada correctamente! Ya puedes iniciar sesión con tu nueva contraseña.');
+      cleanUrlAndLogin();
+    }
+
+    /* ==========================================================================
+       13. VISTAS DE INTERFAZ DE USUARIO
+       ========================================================================== */
+    function authV() {
+      if (S.mode === 'forgot') {
+        return `
+          <div style="min-height:calc(100vh - 32px);display:flex;align-items:center;justify-content:center">
+            <div class="card" style="width:100%;max-width:380px;margin:0">
+              <h1 style="font-size:18px;margin-bottom:12px">${S.recSent ? 'Confirmación enviada' : 'Recuperar contraseña'}</h1>
+              ${!S.recSent ? `
+                <p class="color-mu" style="font-size:13px;margin:0 0 12px">Ingresa tu correo Gmail para enviarte el enlace de recuperación:</p>
+                <label>Correo Gmail</label>
+                <input id="em" type="email" value="${e(S.recEmail || '')}" style="width:100%" onkeydown="if(event.key==='Enter')sendRecoveryEmail()"><br><br>
+                <div class="msg-error">${e(S.err)}</div>
+                <button class="btn-primary" style="width:100%" onclick="sendRecoveryEmail()">Enviar confirmación al correo</button>
+                <p style="text-align:center;margin-top:14px">
+                  <a href="#" onclick="S.mode='login';S.err='';render();return false">Volver a iniciar sesión</a>
+                </p>
+              ` : `
+                <div style="padding:10px 12px;background:var(--item-bg);border:1px solid var(--bd);border-radius:8px;margin-bottom:12px">
+                  <p style="margin:0 0 8px;font-size:14px">Hemos enviado el enlace de confirmación a: <br><b>${e(S.recEmail)}</b></p>
+                  <p style="margin:0;font-size:13px;color:var(--mu)">Haz clic en el enlace para definir tu nueva contraseña:</p>
+                </div>
+                <button class="btn-primary" style="width:100%" onclick="openResetLink('${e(S.recLink)}')">🔗 Abrir enlace del correo</button>
+                <p style="text-align:center;margin-top:14px">
+                  <a href="#" onclick="S.mode='login';S.recSent=false;S.err='';render();return false">Volver a iniciar sesión</a>
+                </p>
+              `}
+            </div>
+          </div>
+        `;
+      }
+
+      if (S.mode === 'reset') {
+        return `
+          <div style="min-height:calc(100vh - 32px);display:flex;align-items:center;justify-content:center">
+            <div class="card" style="width:100%;max-width:380px;margin:0">
+              <h1 style="font-size:18px;margin-bottom:10px">Nueva contraseña</h1>
+              <p class="color-mu" style="font-size:13px;margin:0 0 12px">Escribe la nueva contraseña para <b>${e(S.resetEmail)}</b>:</p>
+              <label>Nueva contraseña</label>
+              <div style="position:relative;width:100%">
+                <input id="pw" type="password" style="width:100%;padding-right:42px" onkeydown="if(event.key==='Enter')submitNewPassword()">
+                <button id="eye-btn" type="button" onclick="togglePw()" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);background:transparent;border:none;cursor:pointer;padding:6px 8px;color:var(--mu);box-shadow:none" title="Mostrar contraseña">${EYE_ICON}</button>
+              </div>
+              <div class="color-mu" style="font-size:12px;margin-top:4px">Mínimo 8 caracteres con mayúsculas, minúsculas y números.</div>
+              <div class="msg-error">${e(S.err)}</div>
+              <button class="btn-primary" style="width:100%;margin-top:8px" onclick="submitNewPassword()">Guardar nueva contraseña</button>
+              <p style="text-align:center;margin-top:14px">
+                <a href="#" onclick="cleanUrlAndLogin();return false">Volver a iniciar sesión</a>
+              </p>
+            </div>
+          </div>
+        `;
+      }
+
+      const r = S.mode === 'reg';
+      return `
+        <div style="min-height:calc(100vh - 32px);display:flex;align-items:center;justify-content:center">
+          <div class="card" style="width:100%;max-width:380px;margin:0">
+            <h1 style="font-size:18px;margin-bottom:14px">${r ? 'Crear cuenta' : 'Sistema de Asistencia'}</h1>
+
+            <label>Correo Gmail</label>
+            <input id="em" type="email" style="width:100%"><br><br>
+
+            <label>Contraseña</label>
+            <div style="position:relative;width:100%">
+              <input id="pw" type="password" style="width:100%;padding-right:42px" onkeydown="if(event.key==='Enter')auth()">
+              <button id="eye-btn" type="button" onclick="togglePw()" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);background:transparent;border:none;cursor:pointer;padding:6px 8px;color:var(--mu);box-shadow:none" title="Mostrar contraseña">${EYE_ICON}</button>
+            </div>
+            ${r ? '<div class="color-mu" style="font-size:12px;margin-top:4px">Mínimo 8 caracteres con mayúsculas, minúsculas y números.</div>' : ''}
+
+            <div class="msg-error">${e(S.err)}</div>
+            <button class="btn-primary" style="width:100%;margin-top:6px" onclick="auth()">${r ? 'Registrarme' : 'Entrar'}</button>
+
+            ${!r ? `
+              <p style="text-align:center;margin:10px 0 0">
+                <a href="#" onclick="S.mode='forgot';S.err='';S.recSent=false;render();return false" style="font-size:13px;color:var(--pr);text-decoration:none">¿Olvidaste tu contraseña?</a>
+              </p>
+            ` : ''}
+
+            <p style="text-align:center;margin-top:12px">
+              <a href="#" onclick="S.mode='${r ? 'login' : 'reg'}';S.err='';render();return false">${r ? 'Ya tengo cuenta' : 'Crear cuenta nueva'}</a>
+            </p>
+          </div>
+        </div>
+      `;
+    }
+
+    function selV() {
+      const gs = groups();
+      const cs = [...new Set(gs.map(g => g.carrera))];
+      if (cs.length && !cs.includes(S.carrera)) S.carrera = cs[0];
+      const gsC = gs.filter(g => g.carrera === S.carrera);
+      const ms = [...new Set(gsC.map(g => g.materia || ''))];
+      if (ms.length && !ms.includes(S.materia)) S.materia = ms[0];
+      const js = gsC.filter(g => (g.materia || '') === S.materia);
+      if (js.length && !js.some(g => g.id === S.gid)) S.gid = js[0].id;
+
+      return `
+        <div class="card row" style="align-items:flex-end">
+          <div style="flex:1;min-width:130px">
+            <label>Grupo / carrera</label>
+            <select onchange="pick('carrera',this.value)" style="width:100%">
+              ${cs.map(c => `<option ${c === S.carrera ? 'selected' : ''}>${e(c)}</option>`).join('')}
+            </select>
+          </div>
+          <div style="flex:1;min-width:130px">
+            <label>Asignatura / materia</label>
+            <select onchange="pick('materia',this.value)" style="width:100%">
+              ${ms.map(m => `<option value="${e(m)}" ${m === S.materia ? 'selected' : ''}>${e(m || '(General)')}</option>`).join('')}
+            </select>
+          </div>
+          <div style="flex:1;min-width:110px">
+            <label>Jornada</label>
+            <select onchange="S.gid=this.value;S.fdate='';S.calOpen=false;render()" style="width:100%">
+              ${js.map(g => `<option value="${g.id}" ${g.id === S.gid ? 'selected' : ''}>${e(g.jornada)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="color-mu" style="flex:1.2;min-width:160px;padding-bottom:6px">
+            ${cur() ? e(horTxt(cur())) : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    function pick(k, v) {
+      S[k] = v;
+      const gs = groups();
+      if (k === 'carrera') {
+        const gsC = gs.filter(g => g.carrera === v);
+        const ms = [...new Set(gsC.map(g => g.materia || ''))];
+        S.materia = ms[0] || '';
+        const match = gsC.filter(g => (g.materia || '') === S.materia);
+        S.gid = match[0]?.id || gsC[0]?.id || '';
+      } else if (k === 'materia') {
+        const match = gs.filter(g => g.carrera === S.carrera && (g.materia || '') === v);
+        S.gid = match[0]?.id || '';
+      }
+      S.fdate = '';
+      S.calOpen = false;
+      S.editSchedIdx = -1;
+      render();
+    }
+
+    function gruposV() {
+      const g = cur();
+      const opt = (sel = 0) => DIAS.map((d, i) => `<option value="${i}" ${+sel === i ? 'selected' : ''}>${d}</option>`).join('');
+      const sch = (p, d = 0, i = '18:00', f = '20:00') => `
+        <select id="${p}d">${opt(d)}</select>
+        <input type="time" id="${p}i" value="${i}">
+        <input type="time" id="${p}f" value="${f}">
+      `;
+
+      const tmpList = S.tmp.length === 0
+        ? ''
+        : `<div style="margin:10px 0;display:flex;flex-direction:column;gap:6px">${S.tmp.map((h, i) => {
+            if (S.editTmpIdx === i) {
+              return `
+                <div class="row" style="background:var(--item-bg);padding:8px 10px;border-radius:8px;border:1px solid var(--pr);gap:6px">
+                  <select id="te_d">${opt(h.dia)}</select>
+                  <input type="time" id="te_i" value="${h.ini}">
+                  <input type="time" id="te_f" value="${h.fin}">
+                  <button class="btn-primary" type="button" onclick="saveEditTmp(${i})">Guardar</button>
+                  <button type="button" onclick="cancelEditTmp()">Cancelar</button>
+                </div>
+              `;
+            }
+            return `
+              <div class="row row-sp" style="background:var(--item-bg);padding:8px 12px;border-radius:8px;border:1px solid var(--bd)">
+                <div><b>${DIAS[h.dia]}</b> <span class="color-mu" style="margin-left:8px">${h.ini}–${h.fin}</span></div>
+                <div class="row" style="gap:6px">
+                  <button type="button" onclick="startEditTmp(${i})">Editar</button>
+                  <button type="button" class="btn-danger" onclick="delTmp(${i})">Eliminar</button>
+                </div>
+              </div>
+            `;
+          }).join('')}</div>`;
+
+      let h = `
+        <div class="card">
+          <h2>Nuevo grupo</h2>
+          <div class="row">
+            <div style="flex:1.2;min-width:160px">
+              <label>Grupo / carrera</label>
+              <input id="gc" placeholder="Ingeniería de Sistemas" value="${e(S.newCarrera || '')}" oninput="S.newCarrera=this.value" style="width:100%">
+            </div>
+            <div style="flex:1.2;min-width:160px">
+              <label>Asignatura / materia</label>
+              <input id="gm" placeholder="Programación Web" value="${e(S.newMateria || '')}" oninput="S.newMateria=this.value" style="width:100%">
+            </div>
+            <div style="flex:1;min-width:120px">
+              <label>Jornada</label>
+              <input id="gj" placeholder="Nocturna 1" value="${e(S.newJornada || '')}" oninput="S.newJornada=this.value" style="width:100%">
+            </div>
+          </div>
+          <label style="margin-top:12px">Horario (agrega cada día de clase)</label>
+          <div class="row">${sch('g')}<button type="button" onclick="addTmp()">Agregar día</button></div>
+          ${tmpList}
+          <button class="btn-primary" style="margin-top:10px" onclick="createGroup()">Crear grupo</button>
+        </div>
+      `;
+
+      if (g) {
+        const gList = g.horario.length === 0
+          ? '<p class="color-mu" style="margin:8px 0;font-size:13px">Sin horarios asignados.</p>'
+          : `<div style="margin:8px 0;display:flex;flex-direction:column;gap:6px">${g.horario.map((x, i) => {
+              if (S.editSchedIdx === i) {
+                return `
+                  <div class="row" style="background:var(--item-bg);padding:8px 10px;border-radius:8px;border:1px solid var(--pr);gap:6px">
+                    <select id="he_d">${opt(x.dia)}</select>
+                    <input type="time" id="he_i" value="${x.ini}">
+                    <input type="time" id="he_f" value="${x.fin}">
+                    <button class="btn-primary" type="button" onclick="saveEditSched(${i})">Guardar</button>
+                    <button type="button" onclick="cancelEditSched()">Cancelar</button>
+                  </div>
+                `;
+              }
+              return `
+                <div class="row row-sp" style="background:var(--item-bg);padding:8px 12px;border-radius:8px;border:1px solid var(--bd)">
+                  <div><b>${DIAS[x.dia]}</b> <span class="color-mu" style="margin-left:8px">${x.ini}–${x.fin}</span></div>
+                  <div class="row" style="gap:6px">
+                    <button type="button" onclick="startEditSched(${i})">Editar</button>
+                    <button type="button" class="btn-danger" onclick="delSched(${i})">Eliminar</button>
+                  </div>
+                </div>
+              `;
+            }).join('')}</div>`;
+
+        const sq = (S.stuQ || '').toLowerCase().trim();
+        const listStudents = g.students.filter(s => !sq || s.id.toLowerCase().includes(sq) || s.nombre.toLowerCase().includes(sq));
+
+        h += `
+          <div class="card">
+            <div class="row row-sp">
+              <h2>${e(g.carrera)}${g.materia ? ' · ' + e(g.materia) : ''} · ${e(g.jornada)}</h2>
+              <button class="btn-danger" onclick="delGroup()">Eliminar grupo</button>
+            </div>
+            <label>Horario</label>
+            ${gList}
+            <div class="row" style="margin-top:8px">${sch('h')}<button type="button" onclick="addSched()">Agregar día</button></div>
+
+            <h2 style="margin-top:18px">Estudiantes (${g.students.length})</h2>
+            <div class="row">
+              <input id="si" placeholder="Identificador">
+              <input id="sn" placeholder="Nombre completo" style="flex:1">
+              <button class="btn-primary" onclick="addStu()">Agregar</button>
+            </div>
+            <label style="margin-top:10px">O pega varios (una línea por estudiante: id, nombre)</label>
+            <textarea id="sb" rows="3" style="width:100%;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--tx)"></textarea>
+            <button onclick="bulk()" style="margin-top:6px">Importar lista</button>
+
+            <div class="row row-sp" style="margin-top:16px;margin-bottom:6px">
+              <label style="margin:0;font-size:13px;font-weight:600">Listado de estudiantes (${listStudents.length}${sq ? ` de ${g.students.length}` : ''})</label>
+              <input placeholder="Buscar por id o nombre" value="${e(S.stuQ || '')}" oninput="S.stuQ=this.value;render();const i=document.getElementById('sq');i&&(i.focus(),i.setSelectionRange(99,99))" id="sq" style="max-width:240px;padding:6px 10px;font-size:13px">
+            </div>
+            <div class="table-scroll" style="margin-top:6px">
+              <table>
+                ${listStudents.map(s => `
+                  <tr>
+                    <td style="font-family:monospace;width:140px;white-space:nowrap">${e(s.id)}</td>
+                    <td style="white-space:normal">${e(s.nombre)}</td>
+                    <td style="width:50px;text-align:right">
+                      <button class="btn-danger" onclick="delStu('${e(s.id)}')" title="Quitar estudiante">✕</button>
+                    </td>
+                  </tr>
+                `).join('')}
+              </table>
+              ${!listStudents.length ? `<p class="color-mu" style="margin:10px 0;font-size:13px">No se encontraron estudiantes para "${e(S.stuQ)}".</p>` : ''}
+            </div>
+          </div>
+        `;
+      }
+      return h;
+    }
+
+    function asisV() {
+      const g = cur();
+      if (!g) return '<div class="card"><p class="color-mu">Selecciona un grupo.</p></div>';
+      if (!g.horario || !g.horario.length) {
+        return '<div class="card"><h2>Tomar asistencia</h2><p class="color-mu">Este grupo no tiene días de clase registrados en su horario. Agrega los días en la pestaña <b>Grupos</b> para poder tomar asistencia.</p></div>';
+      }
+      ensureValidClassDate(g);
+      const rec = g.records[S.date] || {};
+      const aq = (S.asisQ || '').toLowerCase().trim();
+      const asisList = g.students.filter(s => !aq || s.id.toLowerCase().includes(aq) || s.nombre.toLowerCase().includes(aq));
+      const [cy, cm, cd] = S.date.split('-').map(Number);
+      const dObj = new Date(cy, cm - 1, cd);
+      const diaNombre = DIAS[dObj.getDay()];
+      const fechaFormateada = diaNombre + ', ' + cd + ' de ' + MESES[cm - 1] + ' ' + cy;
+
+      return `
+        <div class="card">
+          <div class="row row-sp">
+            <h2>Tomar asistencia</h2>
+            <div class="row" style="position:relative">
+              <input placeholder="Buscar por id o nombre" value="${e(S.asisQ || '')}" oninput="S.asisQ=this.value;render();const i=document.getElementById('aq');i&&(i.focus(),i.setSelectionRange(99,99))" id="aq" style="max-width:200px;padding:6px 10px;font-size:13px">
+              <div style="position:relative;display:inline-block">
+                <div class="row" style="gap:4px">
+                  <button type="button" onclick="stepClassDate(-1)" title="Clase anterior" style="padding:6px 9px">◀</button>
+                  <button id="cal-toggle-btn" type="button" onclick="S.calOpen=!S.calOpen;render()" style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:500;padding:6px 10px;background:var(--item-bg);border:1px solid var(--bd);cursor:pointer" title="Abrir calendario de clases">
+                    📅 <span>${e(fechaFormateada)}</span> <span style="font-size:10px;margin-left:2px">▼</span>
+                  </button>
+                  <button type="button" onclick="stepClassDate(1)" title="Próxima clase" style="padding:6px 9px">▶</button>
+                </div>
+                ${calV(g)}
+              </div>
+            </div>
+          </div>
+          ${g.students.length ? `
+            <div class="table-scroll">
+              <table>
+                <tr>
+                  <th style="width:140px">Identificador</th>
+                  <th>Nombre completo</th>
+                  <th class="center" style="width:160px">Asistencia</th>
+                </tr>
+                ${asisList.map(s => `
+                  <tr>
+                    <td style="font-family:monospace;white-space:nowrap">${e(s.id)}</td>
+                    <td style="white-space:normal">${e(s.nombre)}</td>
+                    <td class="center" style="white-space:nowrap">
+                      <button class="pill ${rec[s.id] === 'P' ? 'pill-ok' : ''}" onclick="mark('${e(s.id)}','P')">Asistió</button>
+                      <button class="pill ${rec[s.id] === 'A' ? 'pill-ko' : ''}" onclick="mark('${e(s.id)}','A')">Faltó</button>
+                    </td>
+                  </tr>
+                `).join('')}
+              </table>
+              ${!asisList.length ? `<p class="color-mu" style="margin:10px 0;font-size:13px">No se encontraron estudiantes para "${e(S.asisQ)}".</p>` : ''}
+            </div>
+          ` : '<p class="color-mu">Agrega estudiantes en la pestaña Grupos.</p>'}
+        </div>
+      `;
+    }
+
+    function histV() {
+      const g = cur();
+      if (!g) return '<div class="card"><p class="color-mu">Selecciona un grupo.</p></div>';
+      const ds = classDates(g, S.month);
+      const [y, m] = S.month.split('-');
+      const f = S.fst;
+      let body = '';
+
+      if (S.fdate) {
+        const r = g.records[S.fdate] || {};
+        const rows = g.students.filter(s => f === 'todos' || (f === 'P' ? r[s.id] === 'P' : r[s.id] !== 'P' && f === 'A' ? r[s.id] === 'A' : false));
+        body = `
+          <table>
+            <tr>
+              <th style="width:140px">Identificador</th>
+              <th>Nombre completo</th>
+              <th class="center" style="width:120px">Estado</th>
+            </tr>
+            ${rows.map(s => `
+              <tr>
+                <td style="font-family:monospace;white-space:nowrap">${e(s.id)}</td>
+                <td style="white-space:normal">${e(s.nombre)}</td>
+                <td class="center ${r[s.id] === 'P' ? 'color-ok' : r[s.id] === 'A' ? 'color-ko' : 'color-mu'}">
+                  ${r[s.id] === 'P' ? 'Asistió' : r[s.id] === 'A' ? 'Faltó' : 'Sin registrar'}
+                </td>
+              </tr>
+            `).join('')}
+          </table>
+        `;
+      } else {
+        const rows = g.students.filter(s => {
+          if (f === 'todos') return true;
+          return ds.some(d => g.records[d]?.[s.id] === f);
+        });
+        body = `
+          <table>
+            <tr>
+              <th style="width:120px">Id</th>
+              <th>Nombre completo</th>
+              ${ds.map(d => `<th class="center">${fmt(d)}</th>`).join('')}
+              <th class="center">Asist.</th>
+              <th class="center">Faltas</th>
+            </tr>
+            ${rows.map(s => {
+              let p = 0, a = 0;
+              return `
+                <tr>
+                  <td style="font-family:monospace;white-space:nowrap">${e(s.id)}</td>
+                  <td style="white-space:normal">${e(s.nombre)}</td>
+                  ${ds.map(d => {
+                    const v = g.records[d]?.[s.id];
+                    if (v === 'P') p++;
+                    if (v === 'A') a++;
+                    return `<td class="center ${v === 'P' ? 'color-ok' : v === 'A' ? 'color-ko' : 'color-mu'}">${v === 'P' ? '✓' : v === 'A' ? '✗' : '–'}</td>`;
+                  }).join('')}
+                  <td class="center color-ok">${p}</td>
+                  <td class="center color-ko">${a}</td>
+                </tr>
+              `;
+            }).join('')}
+          </table>
+        `;
+      }
+
+      return `
+        <div class="card">
+          <h2>Histórico de ${MESES[+m - 1]} ${y}</h2>
+          <div class="row" style="margin-bottom:12px">
+            <div>
+              <label>Mes</label>
+              <input type="month" value="${S.month}" onchange="S.month=this.value;S.fdate='';render()">
+            </div>
+            <div>
+              <label>Fecha</label>
+              <select onchange="S.fdate=this.value;render()">
+                <option value="">Todo el mes</option>
+                ${ds.map(d => `<option value="${d}" ${d === S.fdate ? 'selected' : ''}>${fmt(d)}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label>Mostrar</label>
+              <select onchange="S.fst=this.value;render()">
+                <option value="todos">Todos</option>
+                <option value="P" ${f === 'P' ? 'selected' : ''}>Asistieron</option>
+                <option value="A" ${f === 'A' ? 'selected' : ''}>Faltaron</option>
+              </select>
+            </div>
+          </div>
+          <div class="table-scroll">
+            ${g.students.length ? body : '<p class="color-mu">Sin estudiantes registrados.</p>'}
+          </div>
+        </div>
+      `;
+    }
+
+    function dashV() {
+      const g = cur();
+      if (!g) return '<div class="card"><p class="color-mu">Selecciona un grupo.</p></div>';
+      const q = S.q.toLowerCase().trim();
+      const ses = Object.keys(g.records).length;
+      let tp = 0, ta = 0;
+      const rows = g.students.map(s => ({ s, ...stats(g, s) }));
+      rows.forEach(r => { tp += r.p; ta += r.a; });
+      const pct = tp + ta ? Math.round(tp / (tp + ta) * 100) : 0;
+      const list = rows.filter(r => !q || r.s.id.toLowerCase().includes(q) || r.s.nombre.toLowerCase().includes(q));
+
+      return `
+        <div class="row" style="margin-bottom:12px">
+          <div class="card kpi"><b>${g.students.length}</b>Estudiantes</div>
+          <div class="card kpi"><b>${ses}</b>Clases registradas</div>
+          <div class="card kpi"><b class="color-ok">${pct}%</b>Asistencia promedio</div>
+        </div>
+        <div class="card">
+          <div class="row row-sp">
+            <h2>Asistencias y faltas por estudiante</h2>
+            <input placeholder="Buscar por id o nombre" value="${e(S.q)}" oninput="S.q=this.value;render();const i=document.getElementById('q2');i&&(i.focus(),i.setSelectionRange(99,99))" id="q2" style="max-width:240px;padding:6px 10px;font-size:13px">
+          </div>
+          <div class="row color-mu" style="font-size:12px;margin:6px 0">
+            <span class="color-ok">■ Asistencias</span>
+            <span class="color-ko">■ Faltas</span>
+          </div>
+          ${list.map(r => {
+            const t = r.p + r.a || 1;
+            const itemPct = Math.round(r.p / t * 100);
+            return `
+              <div class="row row-sp" style="margin-bottom:8px;padding:8px 12px;background:var(--item-bg);border:1px solid var(--bd);border-radius:8px;align-items:center">
+                <div style="flex:1.5;min-width:240px;padding-right:12px">
+                  <span class="color-mu" style="font-size:12px;margin-right:8px;font-family:monospace">${e(r.s.id)}</span>
+                  <b>${e(r.s.nombre)}</b>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:200px;justify-content:flex-end">
+                  <div class="progress-bar" style="min-width:90px;max-width:220px;flex:1" title="${r.p} asistencias, ${r.a} faltas (${itemPct}%)">
+                    <i style="width:${r.p / t * 100}%;background:var(--ok)"></i>
+                    <i style="width:${r.a / t * 100}%;background:var(--ko)"></i>
+                  </div>
+                  <div style="min-width:65px;text-align:right;white-space:nowrap;font-size:13px">
+                    <span class="color-ok">${r.p}</span> / <span class="color-ko">${r.a}</span>
+                    <span class="color-mu" style="font-size:11px;margin-left:2px">(${itemPct}%)</span>
+                  </div>
+                </div>
+              </div>
+            `;
+          }).join('') || '<p class="color-mu">Sin datos disponibles.</p>'}
+        </div>
+      `;
+    }
+
+    /* ==========================================================================
+       14. RENDER PRINCIPAL Y CICLO DE VIDA
+       ========================================================================== */
+    function render() {
+      if (!S.user) {
+        $('app').innerHTML = authV();
+        return;
+      }
+      if (groups()) groups().forEach(g => sortStudents(g));
+
+      // Orden de pestañas establecido
+      const T = [
+        ['grupos', 'Grupos'],
+        ['asistencia', 'Asistencia'],
+        ['historico', 'Histórico'],
+        ['dashboard', 'Dashboard']
+      ];
+
+      if (!cur() && groups().length) {
+        S.gid = groups()[0].id;
+        S.carrera = groups()[0].carrera;
+        S.materia = groups()[0].materia || '';
+      }
+      const has = !!cur();
+      if (!has) S.tab = 'grupos';
+
+      $('app').innerHTML = `
+        <div class="row row-sp" style="margin-bottom:12px">
+          <h1>Asistencia</h1>
+          <div class="row">
+            <button type="button" onclick="toggleTheme()" title="Cambiar tema">${themeBtn()}</button>
+            <button type="button" onclick="exportBackup()" title="Descargar copia de respaldo JSON" style="font-size:13px">${DOWNLOAD_ICON} Respaldo</button>
+            <button type="button" onclick="triggerImportBackup()" title="Cargar archivo de respaldo JSON" style="font-size:13px">${UPLOAD_ICON} Cargar</button>
+            <span class="color-mu" style="font-size:13px;margin:0 4px">${e(S.user)}</span>
+            <button onclick="logout()">Salir</button>
+          </div>
+        </div>
+
+        <div class="tabs">
+          ${T.map(([k, l]) => `<button class="${S.tab === k ? 'active' : ''}" onclick="S.tab='${k}';S.calOpen=false;render()">${l}</button>`).join('')}
+        </div>
+
+        ${has ? selV() : ''}
+        ${S.tab === 'grupos' ? gruposV() : S.tab === 'asistencia' && has ? asisV() : S.tab === 'historico' && has ? histV() : dashV()}
+      `;
+    }
+
+    /* ==========================================================================
+       15. LISTENERS DE EVENTOS Y PERIODICIDAD
+       ========================================================================== */
+    setInterval(() => sched(0), 45000);
+    addEventListener('online', () => sched(0));
+    document.addEventListener('click', e => {
+      if (S.calOpen && !e.target.closest('#cal-box') && !e.target.closest('#cal-toggle-btn')) {
+        S.calOpen = false;
+        render();
+      }
+    });
+
+    render();
+  </script>
+</body>
+</html>
