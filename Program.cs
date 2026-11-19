@@ -121,7 +121,19 @@ using (var s = app.Services.CreateScope())
 }
 
 if (cfg.GetValue("Https:Forzar", !app.Environment.IsDevelopment())) { app.UseHsts(); app.UseHttpsRedirection(); }
-app.UseDefaultFiles(); app.UseStaticFiles();   // sirve la web desde wwwroot (mismo origen, sin CORS)
+app.UseDefaultFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        if (ctx.File.Name.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.Context.Response.Headers.Append("Cache-Control", "no-cache, no-store, must-revalidate");
+            ctx.Context.Response.Headers.Append("Pragma", "no-cache");
+            ctx.Context.Response.Headers.Append("Expires", "0");
+        }
+    }
+});
 app.UseCors(); app.UseRateLimiter(); app.UseAuthentication(); app.UseAuthorization();
 
 string Token(Docente u) => new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
@@ -220,8 +232,37 @@ api.MapGet("/grupos/{id:guid}/resumen", async (ClaimsPrincipal u, Guid id, strin
     await r.Resumen(Uid(u), id, q) is { } x ? Results.Ok(x) : Results.NotFound());
 
 // ===== Sincronización =====
-api.MapGet("/sync", async (ClaimsPrincipal u, DateTime? since, IAsistenciaRepository r) => Results.Ok(await r.Pull(Uid(u), since ?? DateTime.UnixEpoch)));
-api.MapPost("/sync", async (ClaimsPrincipal u, SyncPayload p, IAsistenciaRepository r) => { await r.Push(Uid(u), p); return Results.NoContent(); });
+api.MapGet("/sync", async (ClaimsPrincipal u, DateTime? since, IAsistenciaRepository r) =>
+{
+    try
+    {
+        var uid = Uid(u);
+        var res = await r.Pull(uid, since ?? DateTime.UnixEpoch);
+        Console.WriteLine($"[SYNC-PULL] Docente {uid}: retornando {res.Grupos.Count} grupos, {res.Estudiantes.Count} estudiantes.");
+        return Results.Ok(res);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[SYNC-PULL ERROR] {ex.Message}");
+        return Results.Problem(detail: ex.Message, statusCode: 500);
+    }
+});
+
+api.MapPost("/sync", async (ClaimsPrincipal u, SyncPayload p, IAsistenciaRepository r) =>
+{
+    try
+    {
+        var uid = Uid(u);
+        Console.WriteLine($"[SYNC-PUSH] Docente {uid}: guardando {p.Grupos.Count} grupos, {p.Estudiantes.Count} estudiantes, {p.Registros.Count} marcas.");
+        await r.Push(uid, p);
+        return Results.NoContent();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[SYNC-PUSH ERROR] {ex.Message}");
+        return Results.Problem(detail: ex.Message, statusCode: 500);
+    }
+});
 
 app.Run();
 

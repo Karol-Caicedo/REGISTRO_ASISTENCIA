@@ -486,7 +486,8 @@
       editSchedIdx: -1,
       newCarrera: '',
       newMateria: '',
-      newJornada: ''
+      newJornada: '',
+      syncState: 'idle'
     };
 
     const groups = () => GROUPS;
@@ -548,6 +549,20 @@
     let syncAgain = false;
     let syncTimer = null;
 
+    function updateSyncBadge() {
+      const el = $('sync-badge');
+      if (!el) return;
+      if (S.syncState === 'syncing') {
+        el.innerHTML = '<span style="font-size:12px;color:var(--mu);display:inline-flex;align-items:center;gap:4px">⏳ Guardando...</span>';
+      } else if (S.syncState === 'ok') {
+        el.innerHTML = '<span style="font-size:12px;color:var(--ok);display:inline-flex;align-items:center;gap:4px">✓ Guardado</span>';
+      } else if (S.syncState === 'error') {
+        el.innerHTML = '<span style="font-size:12px;color:var(--ko);cursor:pointer;display:inline-flex;align-items:center;gap:4px" onclick="sync()" title="Error al sincronizar con el servidor. Clic para reintentar">⚠ Error al conectar (reintentar)</span>';
+      } else {
+        el.innerHTML = '';
+      }
+    }
+
     const sched = (ms = 100) => {
       clearTimeout(syncTimer);
       syncTimer = setTimeout(sync, ms);
@@ -560,6 +575,8 @@
         return { ok: false, busy: true };
       }
       syncBusy = true;
+      S.syncState = 'syncing';
+      updateSyncBadge();
       const ini = iso();
       normalizeData(GROUPS);
 
@@ -585,7 +602,8 @@
             deleted: false
           });
           for (const d in (g.records || {})) {
-            const v = g.records[d][s.id];
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+            const v = g.records[d]?.[s.id];
             const t = (g.ru || {})[d + '|' + s.id] || g.u || ini;
             if (v) {
               P.registros.push({
@@ -606,7 +624,7 @@
           P.grupos.push({ id: t.id, carrera: t.carrera || '', jornada: t.jornada || '', materia: t.materia || '', horarios: [], updatedAt: t.u, deleted: true });
         } else if (t.t === 'e') {
           P.estudiantes.push({ id: t.uid, grupoId: t.gid, codigo: t.id, nombreCompleto: t.nombre || '', updatedAt: t.u, deleted: true });
-        } else {
+        } else if (t.t === 'r' && /^\d{4}-\d{2}-\d{2}$/.test(t.fecha || '')) {
           P.registros.push({ id: uid(), estudianteId: t.uid, fecha: t.fecha, presente: false, updatedAt: t.u, deleted: true });
         }
       });
@@ -615,6 +633,8 @@
       let r = await api('POST', '/api/sync', P, SYNC_TOKEN);
       if (!r.ok) {
         syncBusy = false;
+        S.syncState = 'error';
+        updateSyncBadge();
         console.error('[SYNC] Error al subir datos:', r);
         if (r.status === 401) {
           logout();
@@ -629,6 +649,8 @@
       r = await api('GET', '/api/sync?since=1970-01-01T00:00:00.000Z', null, SYNC_TOKEN);
       if (!r.ok) {
         syncBusy = false;
+        S.syncState = 'error';
+        updateSyncBadge();
         console.error('[SYNC] Error al descargar datos:', r);
         if (r.status === 401) {
           logout();
@@ -639,7 +661,9 @@
 
       mergeRemoteData(r.body);
       normalizeData(GROUPS);
+      saveCache();
       syncBusy = false;
+      S.syncState = 'ok';
 
       if (!cur() && GROUPS.length > 0) {
         S.gid = GROUPS[0].id;
@@ -1265,11 +1289,7 @@
       await migrateLegacyLocalData(tok, em);
 
       // 4. Sincronizar con el servidor central
-      if (GROUPS.length > 0) {
-        await sync();
-      } else {
-        await sync(true);
-      }
+      await sync();
 
       S.err = '';
       if (GROUPS.length > 0) {
@@ -1870,7 +1890,8 @@
       $('app').innerHTML = `
         <div class="row row-sp" style="margin-bottom:12px">
           <h1>Asistencia</h1>
-          <div class="row">
+          <div class="row" style="align-items:center;gap:6px">
+            <span id="sync-badge"></span>
             <button type="button" onclick="toggleTheme()" title="Cambiar tema">${themeBtn()}</button>
             <span class="color-mu" style="font-size:13px;margin:0 4px">${e(S.user)}</span>
             <button onclick="logout()">Salir</button>
@@ -1884,6 +1905,7 @@
         ${has ? selV() : ''}
         ${S.tab === 'grupos' ? gruposV() : S.tab === 'asistencia' && has ? asisV() : S.tab === 'historico' && has ? histV() : dashV()}
       `;
+      updateSyncBadge();
     }
 
     /* ==========================================================================
@@ -1944,11 +1966,7 @@
 
           render();
           await migrateLegacyLocalData(savedToken, savedUser);
-          if (GROUPS.length > 0) {
-            await sync();
-          } else {
-            await sync(true);
-          }
+          await sync();
         }
       } catch (_) {}
     })();

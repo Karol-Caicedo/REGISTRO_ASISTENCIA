@@ -329,7 +329,7 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
             var payload = new SyncPayload(
                 gs.Select(g => new SyncGrupo(g.Id, g.Carrera, g.Jornada, g.Horarios.Select(HD).ToList(), g.UpdatedAt, g.Deleted, g.Materia)).ToList(),
                 es.Select(e => new SyncEstudiante(e.Id, e.GrupoId, e.Codigo, e.NombreCompleto, e.UpdatedAt, e.Deleted)).ToList(),
-                rs.Select(r => new SyncRegistro(r.Id, r.EstudianteId, DateOnly.Parse(r.Fecha), r.Presente, r.UpdatedAt, r.Deleted)).ToList(),
+                rs.Select(r => new SyncRegistro(r.Id, r.EstudianteId, r.Fecha, r.Presente, r.UpdatedAt, r.Deleted)).ToList(),
                 DateTime.UtcNow
             );
             return Task.FromResult(payload);
@@ -344,9 +344,10 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
             var groupMap = new Dictionary<Guid, Guid>();
             foreach (var sg in p.Grupos)
             {
+                var gid = sg.Id ?? Guid.NewGuid();
                 var t = Utc(sg.UpdatedAt);
                 var effectiveTime = t > now ? t : now;
-                var existing = _data.Grupos.FirstOrDefault(g => g.Id == sg.Id || (g.DocenteId == d && g.Carrera == sg.Carrera && g.Jornada == sg.Jornada && g.Materia == (sg.Materia ?? "")));
+                var existing = _data.Grupos.FirstOrDefault(g => g.Id == gid || (g.DocenteId == d && g.Carrera == sg.Carrera && g.Jornada == sg.Jornada && g.Materia == (sg.Materia ?? "")));
                 if (existing is not null)
                 {
                     existing.Carrera = sg.Carrera;
@@ -355,14 +356,14 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
                     existing.Deleted = sg.Deleted;
                     existing.UpdatedAt = effectiveTime;
                     existing.Horarios = sg.Horarios.Select(H).ToList();
-                    groupMap[sg.Id] = existing.Id;
+                    groupMap[gid] = existing.Id;
                     groupMap[existing.Id] = existing.Id;
                 }
                 else
                 {
                     var n = new Grupo
                     {
-                        Id = sg.Id,
+                        Id = gid,
                         DocenteId = d,
                         Carrera = sg.Carrera,
                         Jornada = sg.Jornada,
@@ -372,17 +373,18 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
                         Horarios = sg.Horarios.Select(H).ToList()
                     };
                     _data.Grupos.Add(n);
-                    groupMap[sg.Id] = n.Id;
+                    groupMap[gid] = n.Id;
                     groupMap[n.Id] = n.Id;
                 }
             }
 
             foreach (var se in p.Estudiantes)
             {
+                var eid = se.Id ?? Guid.NewGuid();
                 var t = Utc(se.UpdatedAt);
                 var effectiveTime = t > now ? t : now;
                 var targetGrupoId = groupMap.TryGetValue(se.GrupoId, out var mappedGid) ? mappedGid : se.GrupoId;
-                var existing = _data.Estudiantes.FirstOrDefault(e => e.Id == se.Id || (e.GrupoId == targetGrupoId && e.Codigo == se.Codigo));
+                var existing = _data.Estudiantes.FirstOrDefault(e => e.Id == eid || (e.GrupoId == targetGrupoId && e.Codigo == se.Codigo));
                 if (existing is not null)
                 {
                     existing.GrupoId = targetGrupoId;
@@ -395,7 +397,7 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
                 {
                     _data.Estudiantes.Add(new Estudiante
                     {
-                        Id = se.Id,
+                        Id = eid,
                         GrupoId = targetGrupoId,
                         Codigo = se.Codigo,
                         NombreCompleto = se.NombreCompleto,
@@ -407,9 +409,24 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
 
             foreach (var sr in p.Registros)
             {
+                var rid = sr.Id ?? Guid.NewGuid();
                 var t = Utc(sr.UpdatedAt);
                 var effectiveTime = t > now ? t : now;
-                var fechaStr = sr.Fecha.ToString("yyyy-MM-dd");
+
+                string fechaStr;
+                if (DateOnly.TryParse(sr.Fecha, out var parsedDate))
+                {
+                    fechaStr = parsedDate.ToString("yyyy-MM-dd");
+                }
+                else if (DateTime.TryParse(sr.Fecha, out var parsedDt))
+                {
+                    fechaStr = parsedDt.ToString("yyyy-MM-dd");
+                }
+                else
+                {
+                    fechaStr = sr.Fecha.Trim();
+                }
+
                 var existing = _data.Registros.FirstOrDefault(r => r.EstudianteId == sr.EstudianteId && r.Fecha == fechaStr);
                 if (existing is not null)
                 {
@@ -422,7 +439,7 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
                 {
                     _data.Registros.Add(new RegistroModel
                     {
-                        Id = sr.Id,
+                        Id = rid,
                         EstudianteId = sr.EstudianteId,
                         Fecha = fechaStr,
                         Presente = sr.Presente,

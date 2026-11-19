@@ -11,7 +11,7 @@ public record MarcaDto(Guid EstudianteId, bool Presente);
 public record AsistenciaReq(DateOnly Fecha, List<MarcaDto> Marcas);
 
 // Sincronización
-public record SyncGrupo(Guid Id, string Carrera, string Jornada, List<HorarioDto> Horarios, DateTime UpdatedAt, bool Deleted, string Materia = "");
-public record SyncEstudiante(Guid Id, Guid GrupoId, string Codigo, string NombreCompleto, DateTime UpdatedAt, bool Deleted);
-public record SyncRegistro(Guid Id, Guid EstudianteId, DateOnly Fecha, bool Presente, DateTime UpdatedAt, bool Deleted);
+public record SyncGrupo(Guid? Id, string Carrera, string Jornada, List<HorarioDto> Horarios, DateTime UpdatedAt, bool Deleted, string Materia = "");
+public record SyncEstudiante(Guid? Id, Guid GrupoId, string Codigo, string NombreCompleto, DateTime UpdatedAt, bool Deleted);
+public record SyncRegistro(Guid? Id, Guid EstudianteId, string Fecha, bool Presente, DateTime UpdatedAt, bool Deleted);
 public record SyncPayload(List<SyncGrupo> Grupos, List<SyncEstudiante> Estudiantes, List<SyncRegistro> Registros, DateTime? ServerTime = null);
