@@ -105,6 +105,26 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
         }
     }
 
+    public Task<bool> EliminarCuenta(Guid d)
+    {
+        lock (_lock)
+        {
+            var u = _data.Docentes.FirstOrDefault(x => x.Id == d);
+            if (u is null) return Task.FromResult(false);
+
+            var gids = _data.Grupos.Where(g => g.DocenteId == d).Select(g => g.Id).ToHashSet();
+            var eids = _data.Estudiantes.Where(e => gids.Contains(e.GrupoId)).Select(e => e.Id).ToHashSet();
+
+            _data.Registros.RemoveAll(r => eids.Contains(r.EstudianteId));
+            _data.Estudiantes.RemoveAll(e => gids.Contains(e.GrupoId));
+            _data.Grupos.RemoveAll(g => g.DocenteId == d);
+            _data.Docentes.Remove(u);
+
+            Save();
+            return Task.FromResult(true);
+        }
+    }
+
     public Task<List<Grupo>> Grupos(Guid d)
     {
         lock (_lock)
