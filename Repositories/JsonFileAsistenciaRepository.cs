@@ -320,11 +320,11 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
         {
             since = Utc(since);
             var isAll = since.Year < 2000;
-            var gs = _data.Grupos.Where(g => g.DocenteId == d && (isAll || g.UpdatedAt > since)).ToList();
-            var gids = _data.Grupos.Where(g => g.DocenteId == d).Select(g => g.Id).ToHashSet();
-            var es = _data.Estudiantes.Where(e => gids.Contains(e.GrupoId) && (isAll || e.UpdatedAt > since)).ToList();
-            var eids = _data.Estudiantes.Where(e => gids.Contains(e.GrupoId)).Select(e => e.Id).ToHashSet();
-            var rs = _data.Registros.Where(r => eids.Contains(r.EstudianteId) && (isAll || r.UpdatedAt > since)).ToList();
+            var gs = _data.Grupos.Where(g => g.DocenteId == d && (isAll ? !g.Deleted : g.UpdatedAt > since)).ToList();
+            var gids = _data.Grupos.Where(g => g.DocenteId == d && (isAll ? !g.Deleted : true)).Select(g => g.Id).ToHashSet();
+            var es = _data.Estudiantes.Where(e => gids.Contains(e.GrupoId) && (isAll ? !e.Deleted : e.UpdatedAt > since)).ToList();
+            var eids = _data.Estudiantes.Where(e => gids.Contains(e.GrupoId) && (isAll ? !e.Deleted : true)).Select(e => e.Id).ToHashSet();
+            var rs = _data.Registros.Where(r => eids.Contains(r.EstudianteId) && (isAll ? !r.Deleted : r.UpdatedAt > since)).ToList();
 
             var payload = new SyncPayload(
                 gs.Select(g => new SyncGrupo(g.Id, g.Carrera, g.Jornada, g.Horarios.Select(HD).ToList(), g.UpdatedAt, g.Deleted, g.Materia)).ToList(),
@@ -341,6 +341,7 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
         lock (_lock)
         {
             var now = DateTime.UtcNow;
+            var groupMap = new Dictionary<Guid, Guid>();
             foreach (var sg in p.Grupos)
             {
                 var t = Utc(sg.UpdatedAt);
@@ -354,10 +355,12 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
                     existing.Deleted = sg.Deleted;
                     existing.UpdatedAt = effectiveTime;
                     existing.Horarios = sg.Horarios.Select(H).ToList();
+                    groupMap[sg.Id] = existing.Id;
+                    groupMap[existing.Id] = existing.Id;
                 }
                 else
                 {
-                    _data.Grupos.Add(new Grupo
+                    var n = new Grupo
                     {
                         Id = sg.Id,
                         DocenteId = d,
@@ -367,7 +370,10 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
                         Deleted = sg.Deleted,
                         UpdatedAt = effectiveTime,
                         Horarios = sg.Horarios.Select(H).ToList()
-                    });
+                    };
+                    _data.Grupos.Add(n);
+                    groupMap[sg.Id] = n.Id;
+                    groupMap[n.Id] = n.Id;
                 }
             }
 
@@ -375,9 +381,11 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
             {
                 var t = Utc(se.UpdatedAt);
                 var effectiveTime = t > now ? t : now;
-                var existing = _data.Estudiantes.FirstOrDefault(e => e.Id == se.Id || (e.GrupoId == se.GrupoId && e.Codigo == se.Codigo));
+                var targetGrupoId = groupMap.TryGetValue(se.GrupoId, out var mappedGid) ? mappedGid : se.GrupoId;
+                var existing = _data.Estudiantes.FirstOrDefault(e => e.Id == se.Id || (e.GrupoId == targetGrupoId && e.Codigo == se.Codigo));
                 if (existing is not null)
                 {
+                    existing.GrupoId = targetGrupoId;
                     existing.Codigo = se.Codigo;
                     existing.NombreCompleto = se.NombreCompleto;
                     existing.Deleted = se.Deleted;
@@ -388,7 +396,7 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
                     _data.Estudiantes.Add(new Estudiante
                     {
                         Id = se.Id,
-                        GrupoId = se.GrupoId,
+                        GrupoId = targetGrupoId,
                         Codigo = se.Codigo,
                         NombreCompleto = se.NombreCompleto,
                         Deleted = se.Deleted,

@@ -115,11 +115,11 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
     {
         since = Utc(since);
         var isAll = since.Year < 2000;
-        var gs = await db.Grupos.Include(g => g.Horarios).Where(g => g.DocenteId == d && (isAll || g.UpdatedAt > since)).ToListAsync();
-        var gids = await db.Grupos.Where(g => g.DocenteId == d).Select(g => g.Id).ToListAsync();
-        var es = await db.Estudiantes.Where(e => gids.Contains(e.GrupoId) && (isAll || e.UpdatedAt > since)).ToListAsync();
-        var eids = (await db.Estudiantes.Where(e => gids.Contains(e.GrupoId)).Select(e => e.Id).ToListAsync()).ToHashSet();
-        var rs = await db.Registros.Where(r => eids.Contains(r.EstudianteId) && (isAll || r.UpdatedAt > since)).ToListAsync();
+        var gs = await db.Grupos.Include(g => g.Horarios).Where(g => g.DocenteId == d && (isAll ? !g.Deleted : g.UpdatedAt > since)).ToListAsync();
+        var gids = await db.Grupos.Where(g => g.DocenteId == d && (isAll ? !g.Deleted : true)).Select(g => g.Id).ToListAsync();
+        var es = await db.Estudiantes.Where(e => gids.Contains(e.GrupoId) && (isAll ? !e.Deleted : e.UpdatedAt > since)).ToListAsync();
+        var eids = (await db.Estudiantes.Where(e => gids.Contains(e.GrupoId) && (isAll ? !e.Deleted : true)).Select(e => e.Id).ToListAsync()).ToHashSet();
+        var rs = await db.Registros.Where(r => eids.Contains(r.EstudianteId) && (isAll ? !r.Deleted : r.UpdatedAt > since)).ToListAsync();
         return new SyncPayload(
             gs.Select(g => new SyncGrupo(g.Id, g.Carrera, g.Jornada, g.Horarios.Select(HD).ToList(), g.UpdatedAt, g.Deleted, g.Materia)).ToList(),
             es.Select(e => new SyncEstudiante(e.Id, e.GrupoId, e.Codigo, e.NombreCompleto, e.UpdatedAt, e.Deleted)).ToList(),
