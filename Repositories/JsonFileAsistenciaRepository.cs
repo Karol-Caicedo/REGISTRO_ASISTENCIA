@@ -339,9 +339,11 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
     {
         lock (_lock)
         {
+            var now = DateTime.UtcNow;
             foreach (var sg in p.Grupos)
             {
                 var t = Utc(sg.UpdatedAt);
+                var effectiveTime = t > now ? t : now;
                 var existing = _data.Grupos.FirstOrDefault(g => g.Id == sg.Id);
                 if (existing is not null)
                 {
@@ -350,7 +352,7 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
                     existing.Jornada = sg.Jornada;
                     existing.Materia = sg.Materia ?? "";
                     existing.Deleted = sg.Deleted;
-                    existing.UpdatedAt = t;
+                    existing.UpdatedAt = effectiveTime;
                     existing.Horarios = sg.Horarios.Select(H).ToList();
                 }
                 else
@@ -363,7 +365,7 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
                         Jornada = sg.Jornada,
                         Materia = sg.Materia ?? "",
                         Deleted = sg.Deleted,
-                        UpdatedAt = t,
+                        UpdatedAt = effectiveTime,
                         Horarios = sg.Horarios.Select(H).ToList()
                     });
                 }
@@ -372,6 +374,7 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
             foreach (var se in p.Estudiantes)
             {
                 var t = Utc(se.UpdatedAt);
+                var effectiveTime = t > now ? t : now;
                 var existing = _data.Estudiantes.FirstOrDefault(e => e.Id == se.Id);
                 if (existing is not null)
                 {
@@ -379,7 +382,7 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
                     existing.Codigo = se.Codigo;
                     existing.NombreCompleto = se.NombreCompleto;
                     existing.Deleted = se.Deleted;
-                    existing.UpdatedAt = t;
+                    existing.UpdatedAt = effectiveTime;
                 }
                 else
                 {
@@ -390,7 +393,7 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
                         Codigo = se.Codigo,
                         NombreCompleto = se.NombreCompleto,
                         Deleted = se.Deleted,
-                        UpdatedAt = t
+                        UpdatedAt = effectiveTime
                     });
                 }
             }
@@ -398,6 +401,7 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
             foreach (var sr in p.Registros)
             {
                 var t = Utc(sr.UpdatedAt);
+                var effectiveTime = t > now ? t : now;
                 var fechaStr = sr.Fecha.ToString("yyyy-MM-dd");
                 var existing = _data.Registros.FirstOrDefault(r => r.EstudianteId == sr.EstudianteId && r.Fecha == fechaStr);
                 if (existing is not null)
@@ -405,7 +409,7 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
                     if (t <= existing.UpdatedAt) continue;
                     existing.Presente = sr.Presente;
                     existing.Deleted = sr.Deleted;
-                    existing.UpdatedAt = t;
+                    existing.UpdatedAt = effectiveTime;
                 }
                 else
                 {
@@ -416,7 +420,7 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
                         Fecha = fechaStr,
                         Presente = sr.Presente,
                         Deleted = sr.Deleted,
-                        UpdatedAt = t
+                        UpdatedAt = effectiveTime
                     });
                 }
             }

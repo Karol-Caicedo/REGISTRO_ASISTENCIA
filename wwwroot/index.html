@@ -519,6 +519,34 @@
       if (S.user) sched();
     };
 
+    const isValidGuid = id => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(id || ''));
+
+    function normalizeData(D) {
+      if (!D || !D.groups) return;
+      D.groups.forEach(g => {
+        if (!g.id || !isValidGuid(g.id)) g.id = uid();
+        if (!g.u) g.u = iso();
+        if (!g.materia) g.materia = '';
+        if (!Array.isArray(g.horario)) g.horario = [];
+        if (!g.records || typeof g.records !== 'object') g.records = {};
+        if (!g.ru || typeof g.ru !== 'object') g.ru = {};
+        if (!Array.isArray(g.students)) g.students = [];
+        g.students.forEach(s => {
+          if (!s.uid || !isValidGuid(s.uid)) s.uid = uid();
+          if (!s.u) s.u = iso();
+          if (!s.id) s.id = '';
+          if (!s.nombre) s.nombre = '';
+        });
+        for (const d in g.records) {
+          if (typeof g.records[d] !== 'object') continue;
+          for (const sid in g.records[d]) {
+            const k = d + '|' + sid;
+            if (!g.ru[k]) g.ru[k] = iso();
+          }
+        }
+      });
+    }
+
     /* ==========================================================================
        6. MOTOR DE SINCRONIZACIÓN (MULTI-DISPOSITIVO LAST-WRITE-WINS)
        ========================================================================== */
@@ -531,50 +559,48 @@
       syncTimer = setTimeout(sync, ms);
     };
 
-    async function sync() {
-      if (!S.user) return;
+    async function sync(forceAll = false) {
+      if (!S.user) return { ok: false, error: 'No user' };
       if (syncBusy) {
         syncAgain = true;
-        return;
+        return { ok: false, busy: true };
       }
       const em = S.user;
       const D = DB.data[em];
+      if (!D) return { ok: false };
+      normalizeData(D);
       const y = SY();
-      if (!y.token) return;
+      if (!y.token) return { ok: false, error: 'Sin sesión activa con el servidor' };
 
       syncBusy = true;
       const ini = iso();
-      const nw = t => !y.pushed || t > y.pushed;
 
       const P = { grupos: [], estudiantes: [], registros: [] };
 
+      // Enviamos todos los grupos y estudiantes actuales para garantizar consistencia total
       D.groups.forEach(g => {
-        if (nw(g.u)) {
-          P.grupos.push({
-            id: g.id,
-            carrera: g.carrera,
-            jornada: g.jornada,
-            materia: g.materia || '',
-            horarios: g.horario.map(h => ({ dia: +h.dia, inicio: h.ini, fin: h.fin })),
-            updatedAt: g.u,
+        P.grupos.push({
+          id: g.id,
+          carrera: g.carrera,
+          jornada: g.jornada,
+          materia: g.materia || '',
+          horarios: (g.horario || []).map(h => ({ dia: +h.dia, inicio: h.ini || h.inicio, fin: h.fin })),
+          updatedAt: g.u || ini,
+          deleted: false
+        });
+        (g.students || []).forEach(s => {
+          P.estudiantes.push({
+            id: s.uid,
+            grupoId: g.id,
+            codigo: s.id,
+            nombreCompleto: s.nombre,
+            updatedAt: s.u || ini,
             deleted: false
           });
-        }
-        g.students.forEach(s => {
-          if (nw(s.u)) {
-            P.estudiantes.push({
-              id: s.uid,
-              grupoId: g.id,
-              codigo: s.id,
-              nombreCompleto: s.nombre,
-              updatedAt: s.u,
-              deleted: false
-            });
-          }
-          for (const d in g.records) {
+          for (const d in (g.records || {})) {
             const v = g.records[d][s.id];
-            const t = (g.ru || {})[d + '|' + s.id];
-            if (v && t && nw(t)) {
+            const t = (g.ru || {})[d + '|' + s.id] || g.u || ini;
+            if (v) {
               P.registros.push({
                 id: uid(),
                 estudianteId: s.uid,
@@ -598,44 +624,74 @@
         }
       });
 
-      // 1. Enviar cambios pendientes al servidor central
+      // 1. Enviar cambios al servidor central
       let r = await api('POST', '/api/sync', P, y.token);
       if (!r.ok) {
         syncBusy = false;
+        console.error('[SYNC] Error al subir datos:', r);
         if (r.status === 401) y.token = '';
         if (syncAgain) { syncAgain = false; sched(); }
-        return;
+        return { ok: false, status: r.status, error: r.body?.error || 'Error al conectar con el servidor' };
       }
 
       y.tomb = y.tomb.filter(t => t.u > ini);
       y.pushed = ini;
 
-      // 2. Traer cambios generados en otros dispositivos
-      r = await api('GET', '/api/sync?since=' + encodeURIComponent(y.since), null, y.token);
+      // 2. Traer todos los datos del servidor (desde 1970 en forzado o si faltan datos locales)
+      const pullSince = (forceAll || !D.groups.length || D.groups.every(g => !g.students || !g.students.length))
+        ? '1970-01-01T00:00:00.000Z'
+        : y.since;
+
+      r = await api('GET', '/api/sync?since=' + encodeURIComponent(pullSince), null, y.token);
       if (!r.ok) {
         syncBusy = false;
+        console.error('[SYNC] Error al descargar datos:', r);
         if (r.status === 401) y.token = '';
         if (syncAgain) { syncAgain = false; sched(); }
-        return;
+        return { ok: false, status: r.status, error: 'Error al descargar datos' };
       }
 
       const changed = mergeRemoteData(r.body, D);
-      y.since = new Date(Date.parse(r.body.serverTime) - 3e5).toISOString();
+      y.since = new Date(Date.parse(r.body.serverTime || ini) - 3e5).toISOString();
+      normalizeData(D);
       Repo.save(DB);
 
       syncBusy = false;
 
-      // Si se actualizaron datos y el usuario no está escribiendo en un input, re-renderizar
-      if (S.user === em && changed) {
-        const active = document.activeElement;
-        if (!active || !active.matches('input,textarea,select')) {
-          render();
+      if (S.user === em) {
+        if (!cur() && D.groups.length > 0) {
+          S.gid = D.groups[0].id;
+          S.carrera = D.groups[0].carrera;
+          S.materia = D.groups[0].materia || '';
         }
+        render();
       }
 
       if (syncAgain) {
         syncAgain = false;
         sched();
+      }
+
+      const totalStus = D.groups.reduce((acc, g) => acc + (g.students ? g.students.length : 0), 0);
+      return { ok: true, grupos: D.groups.length, estudiantes: totalStus };
+    }
+
+    async function manualSync() {
+      const btn = $('sync-btn');
+      if (btn) btn.innerHTML = '⏳ Sincronizando…';
+      try {
+        const res = await sync(true);
+        if (res.ok) {
+          alert(`¡Sincronización completada con éxito!\n\n${res.grupos} grupo(s) y ${res.estudiantes} estudiante(s) actualizados con el servidor.`);
+        } else if (res.busy) {
+          alert('Sincronización en curso, por favor espera un momento.');
+        } else {
+          alert(`Aviso de sincronización: ${res.error || 'No se pudo conectar con el servidor.'}`);
+        }
+      } catch (err) {
+        alert('Error durante la sincronización: ' + err.message);
+      } finally {
+        render();
       }
     }
 
@@ -1253,12 +1309,13 @@
       DB.data[em] = DB.data[em] || { groups: [] };
       S.user = em;
       SY().token = tok;
+      try { localStorage.setItem('asist_last_user', em); } catch (_) {}
       Repo.save(DB);
 
-      // Traer inmediatamente los datos del servidor central antes de renderizar
+      // Traer inmediatamente los datos del servidor central antes de renderizar (forzado desde 1970)
       if (tok) {
         try {
-          await sync();
+          await sync(true);
         } catch (_) {}
       }
 
@@ -1282,6 +1339,7 @@
         SY().token = '';
         Repo.save(DB);
       }
+      try { localStorage.removeItem('asist_last_user'); } catch (_) {}
       S.user = null;
       render();
     }
@@ -1864,6 +1922,7 @@
         <div class="row row-sp" style="margin-bottom:12px">
           <h1>Asistencia</h1>
           <div class="row">
+            <button id="sync-btn" type="button" onclick="manualSync()" title="Sincronizar datos con la nube y otros dispositivos" style="font-size:13px">🔄 Sincronizar</button>
             <button type="button" onclick="toggleTheme()" title="Cambiar tema">${themeBtn()}</button>
             <button type="button" onclick="exportBackup()" title="Descargar copia de respaldo JSON" style="font-size:13px">${DOWNLOAD_ICON} Respaldo</button>
             <button type="button" onclick="triggerImportBackup()" title="Cargar archivo de respaldo JSON" style="font-size:13px">${UPLOAD_ICON} Cargar</button>
@@ -1892,6 +1951,22 @@
         render();
       }
     });
+
+    // Restaurar sesión guardada si existe y sincronizar en segundo plano
+    try {
+      const lastUser = localStorage.getItem('asist_last_user');
+      if (lastUser && DB.users[lastUser] && DB.data[lastUser]) {
+        S.user = lastUser;
+        normalizeData(DB.data[lastUser]);
+        const gs = groups();
+        if (gs.length > 0) {
+          S.gid = gs[0].id;
+          S.carrera = gs[0].carrera;
+          S.materia = gs[0].materia || '';
+        }
+        setTimeout(() => sync(true), 350);
+      }
+    } catch (_) {}
 
     render();
   </script>
