@@ -507,12 +507,17 @@
       if (!S.user) return;
       try {
         localStorage.setItem('asist_cache_' + S.user, JSON.stringify(GROUPS));
+        localStorage.setItem('asist_tomb_' + S.user, JSON.stringify(TOMB));
       } catch (_) { }
     }
 
     function loadCache(user) {
       if (!user) return null;
       try {
+        const rawT = localStorage.getItem('asist_tomb_' + user);
+        if (rawT) {
+          try { TOMB = JSON.parse(rawT) || []; } catch (_) { TOMB = []; }
+        }
         const raw = localStorage.getItem('asist_cache_' + user);
         if (raw) return JSON.parse(raw);
       } catch (_) { }
@@ -645,6 +650,7 @@
       }
 
       TOMB = TOMB.filter(t => t.u > ini);
+      saveCache();
 
       // 2. Traer todos los datos del servidor central
       r = await api('GET', '/api/sync?since=1970-01-01T00:00:00.000Z', null, SYNC_TOKEN);
@@ -730,6 +736,13 @@
           }
           return;
         }
+
+        // Si está en la lista de eliminaciones pendientes (TOMB), evitar que reaparezca
+        const xCod = String(x.codigo || '').trim().toLowerCase();
+        if (TOMB.some(t => t.t === 'e' && (t.uid === x.id || ((t.gid === x.grupoId || !t.gid) && String(t.id || '').trim().toLowerCase() === xCod)))) {
+          return;
+        }
+
         const g = GROUPS.find(q => q.id === x.grupoId);
         if (!g) return;
         const f = idx[x.id] || idx[x.grupoId + '|' + x.codigo];
@@ -944,18 +957,25 @@
       render();
     }
 
-    function delGroup() {
+    async function delGroup() {
       if (confirm('¿Eliminar este grupo y todo su histórico?')) {
         const g0 = cur();
         if (g0) {
           TOMB.push({ t: 'g', id: g0.id, carrera: g0.carrera, jornada: g0.jornada, materia: g0.materia || '', u: iso() });
+          (g0.students || []).forEach(s => {
+            TOMB.push({ t: 'e', uid: s.uid, gid: g0.id, id: s.id, nombre: s.nombre, u: iso() });
+          });
+          if (isValidGuid(g0.id)) {
+            api('DELETE', `/api/grupos/${g0.id}`, null, SYNC_TOKEN).catch(() => {});
+          }
         }
         GROUPS = GROUPS.filter(g => g.id !== S.gid);
         S.gid = GROUPS[0]?.id || '';
         S.carrera = GROUPS[0]?.carrera || '';
         S.materia = GROUPS[0]?.materia || '';
-        save(true);
+        saveCache();
         render();
+        await sync(true);
       }
     }
 
@@ -1049,17 +1069,25 @@
       render();
     }
 
-    function delStu(idOrIdx) {
+    async function delStu(idOrIdx) {
       if (confirm('¿Quitar estudiante?')) {
         const g = cur();
         if (!g) return;
         const idx = typeof idOrIdx === 'string' ? g.students.findIndex(x => x.id === idOrIdx) : idOrIdx;
         if (idx < 0 || idx >= g.students.length) return;
         const s = g.students[idx];
-        SY().tomb.push({ t: 'e', uid: s.uid, gid: g.id, id: s.id, nombre: s.nombre, u: iso() });
+        const sUid = s.uid;
+        const sId = s.id;
+        const sNombre = s.nombre;
+        TOMB.push({ t: 'e', uid: sUid, gid: g.id, id: sId, nombre: sNombre, u: iso() });
         g.students.splice(idx, 1);
-        save(true);
+        saveCache();
         render();
+
+        if (isValidGuid(g.id) && isValidGuid(sUid)) {
+          api('DELETE', `/api/grupos/${g.id}/estudiantes/${sUid}`, null, SYNC_TOKEN).catch(() => {});
+        }
+        await sync(true);
       }
     }
 
