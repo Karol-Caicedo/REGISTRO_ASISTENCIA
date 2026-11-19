@@ -257,10 +257,23 @@ api.MapPost("/sync", async (ClaimsPrincipal u, SyncPayload p, IAsistenciaReposit
         await r.Push(uid, p);
         return Results.NoContent();
     }
+    catch (DbUpdateConcurrencyException ex)
+    {
+        // Registra qué entidad(es) fallaron y en qué estado estaban (Added/Modified/Deleted).
+        foreach (var en in ex.Entries)
+        {
+            var id = en.Metadata.FindProperty("Id") is not null ? en.Property("Id").CurrentValue : null;
+            Console.WriteLine($"[SYNC-CONCURRENCY] {en.Metadata.ClrType.Name} estado={en.State} id={id}");
+        }
+        Console.WriteLine($"[SYNC-PUSH ERROR] {ex}");
+        return Results.Problem(detail: ex.Message, statusCode: 500);
+    }
     catch (Exception ex)
     {
-        Console.WriteLine($"[SYNC-PUSH ERROR] {ex.Message}");
-        return Results.Problem(detail: ex.Message, statusCode: 500);
+        // El motivo real de un fallo de SaveChanges suele estar en la excepción interna.
+        var real = ex.InnerException?.Message ?? ex.Message;
+        Console.WriteLine($"[SYNC-PUSH ERROR] {ex}");
+        return Results.Problem(detail: real, statusCode: 500);
     }
 });
 
