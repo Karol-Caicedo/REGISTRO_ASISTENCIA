@@ -52,9 +52,9 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
 
     public async Task<bool> EliminarEstudiante(Guid d, Guid gid, Guid eid)
     {
-        var e = await db.Estudiantes.FirstOrDefaultAsync(e => e.Id == eid && e.GrupoId == gid && e.Grupo!.DocenteId == d && !e.Deleted);
+        var e = await db.Estudiantes.Include(x => x.Grupo).FirstOrDefaultAsync(e => e.Id == eid && (e.GrupoId == gid || (e.Grupo != null && e.Grupo.DocenteId == d)) && !e.Deleted);
         if (e is null) return false;
-        e.Deleted = true; e.UpdatedAt = DateTime.UtcNow; await db.SaveChangesAsync(); return true;
+        e.Deleted = true; e.UpdatedAt = DateTime.UtcNow; await SafeSaveChanges(); return true;
     }
 
     public async Task<bool> GuardarAsistencia(Guid d, Guid gid, AsistenciaReq req)
@@ -200,24 +200,60 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
             var t = Utc(s.UpdatedAt);
             var effectiveTime = t > now ? t : now;
             var targetGrupoId = mine.TryGetValue(s.GrupoId, out var mg) ? mg.Id : s.GrupoId;
+            var sCod = s.Codigo?.Trim() ?? "";
 
-            var existingEst = est.FirstOrDefault(e => e.Id == eid || (e.GrupoId == targetGrupoId && e.Codigo == s.Codigo));
+            if (s.Deleted)
+            {
+                var toDelete = est.Where(e =>
+                    (s.Id.HasValue && e.Id == s.Id.Value) ||
+                    (!string.IsNullOrEmpty(sCod) && (e.GrupoId == targetGrupoId || mine.ContainsKey(e.GrupoId)) &&
+                     string.Equals(e.Codigo?.Trim(), sCod, StringComparison.OrdinalIgnoreCase))
+                ).ToList();
+
+                if (toDelete.Count > 0)
+                {
+                    foreach (var td in toDelete)
+                    {
+                        td.Deleted = true;
+                        td.UpdatedAt = effectiveTime;
+                    }
+                }
+                else if (s.Id.HasValue || !string.IsNullOrEmpty(sCod))
+                {
+                    var inDbList = await db.Estudiantes
+                        .Include(e => e.Grupo)
+                        .Where(e => e.Grupo != null && e.Grupo.DocenteId == d && !e.Deleted &&
+                            ((s.Id.HasValue && e.Id == s.Id.Value) || (!string.IsNullOrEmpty(sCod) && e.Codigo == sCod)))
+                        .ToListAsync();
+                    foreach (var item in inDbList)
+                    {
+                        item.Deleted = true;
+                        item.UpdatedAt = effectiveTime;
+                    }
+                }
+                continue;
+            }
+
+            var existingEst = est.FirstOrDefault(e =>
+                (s.Id.HasValue && e.Id == s.Id.Value) ||
+                (e.GrupoId == targetGrupoId && string.Equals(e.Codigo?.Trim(), sCod, StringComparison.OrdinalIgnoreCase)));
+
             if (existingEst is not null)
             {
-                existingEst.Codigo = s.Codigo;
-                existingEst.NombreCompleto = s.NombreCompleto;
-                existingEst.Deleted = s.Deleted;
+                existingEst.Codigo = sCod;
+                existingEst.NombreCompleto = s.NombreCompleto?.Trim() ?? "";
+                existingEst.Deleted = false;
                 existingEst.UpdatedAt = effectiveTime;
             }
             else if (mine.ContainsKey(s.GrupoId) || mine.Values.Any(g => g.Id == targetGrupoId))
             {
-                var inDb = await db.Estudiantes.FirstOrDefaultAsync(x => x.Id == eid);
+                var inDb = s.Id.HasValue ? await db.Estudiantes.FirstOrDefaultAsync(x => x.Id == s.Id.Value) : null;
                 if (inDb is not null)
                 {
                     inDb.GrupoId = targetGrupoId;
-                    inDb.Codigo = s.Codigo;
-                    inDb.NombreCompleto = s.NombreCompleto;
-                    inDb.Deleted = s.Deleted;
+                    inDb.Codigo = sCod;
+                    inDb.NombreCompleto = s.NombreCompleto?.Trim() ?? "";
+                    inDb.Deleted = false;
                     inDb.UpdatedAt = effectiveTime;
                     est.Add(inDb);
                 }
@@ -227,9 +263,9 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
                     {
                         Id = eid,
                         GrupoId = targetGrupoId,
-                        Codigo = s.Codigo,
-                        NombreCompleto = s.NombreCompleto,
-                        Deleted = s.Deleted,
+                        Codigo = sCod,
+                        NombreCompleto = s.NombreCompleto?.Trim() ?? "",
+                        Deleted = false,
                         UpdatedAt = effectiveTime
                     };
                     db.Estudiantes.Add(n);

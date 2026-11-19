@@ -384,13 +384,32 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
                 var t = Utc(se.UpdatedAt);
                 var effectiveTime = t > now ? t : now;
                 var targetGrupoId = groupMap.TryGetValue(se.GrupoId, out var mappedGid) ? mappedGid : se.GrupoId;
-                var existing = _data.Estudiantes.FirstOrDefault(e => e.Id == eid || (e.GrupoId == targetGrupoId && e.Codigo == se.Codigo));
+                var sCod = se.Codigo?.Trim() ?? "";
+
+                if (se.Deleted)
+                {
+                    var toDelete = _data.Estudiantes.Where(e =>
+                        (se.Id.HasValue && e.Id == se.Id.Value) ||
+                        (!string.IsNullOrEmpty(sCod) && (e.GrupoId == targetGrupoId || groupMap.ContainsKey(e.GrupoId)) &&
+                         string.Equals(e.Codigo?.Trim(), sCod, StringComparison.OrdinalIgnoreCase))
+                    ).ToList();
+                    foreach (var td in toDelete)
+                    {
+                        td.Deleted = true;
+                        td.UpdatedAt = effectiveTime;
+                    }
+                    continue;
+                }
+
+                var existing = _data.Estudiantes.FirstOrDefault(e =>
+                    (se.Id.HasValue && e.Id == se.Id.Value) ||
+                    (e.GrupoId == targetGrupoId && string.Equals(e.Codigo?.Trim(), sCod, StringComparison.OrdinalIgnoreCase)));
                 if (existing is not null)
                 {
                     existing.GrupoId = targetGrupoId;
-                    existing.Codigo = se.Codigo;
-                    existing.NombreCompleto = se.NombreCompleto;
-                    existing.Deleted = se.Deleted;
+                    existing.Codigo = sCod;
+                    existing.NombreCompleto = se.NombreCompleto?.Trim() ?? "";
+                    existing.Deleted = false;
                     existing.UpdatedAt = effectiveTime;
                 }
                 else
@@ -399,9 +418,9 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
                     {
                         Id = eid,
                         GrupoId = targetGrupoId,
-                        Codigo = se.Codigo,
-                        NombreCompleto = se.NombreCompleto,
-                        Deleted = se.Deleted,
+                        Codigo = sCod,
+                        NombreCompleto = se.NombreCompleto?.Trim() ?? "",
+                        Deleted = false,
                         UpdatedAt = effectiveTime
                     });
                 }
