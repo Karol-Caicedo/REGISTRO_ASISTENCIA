@@ -436,7 +436,7 @@
       try {
         const res = await fetch(base + path, {
           method,
-          signal: AbortSignal.timeout(8000),
+          signal: AbortSignal.timeout(15000),
           headers: {
             'Content-Type': 'application/json',
             ...(token ? { 'Authorization': 'Bearer ' + token } : {})
@@ -1264,8 +1264,12 @@
       // 3. Migrar datos locales previos al servidor si existían
       await migrateLegacyLocalData(tok, em);
 
-      // 4. Traer los datos directamente desde el servidor central
-      await sync(true);
+      // 4. Sincronizar con el servidor central
+      if (GROUPS.length > 0) {
+        await sync();
+      } else {
+        await sync(true);
+      }
 
       S.err = '';
       if (GROUPS.length > 0) {
@@ -1940,7 +1944,11 @@
 
           render();
           await migrateLegacyLocalData(savedToken, savedUser);
-          await sync(true);
+          if (GROUPS.length > 0) {
+            await sync();
+          } else {
+            await sync(true);
+          }
         }
       } catch (_) {}
     })();

@@ -37,7 +37,7 @@ static string ResolvePostgresConnection(IConfiguration cfg)
         var db = Environment.GetEnvironmentVariable("PGDATABASE") ?? "railway";
         var user = Environment.GetEnvironmentVariable("PGUSER") ?? "postgres";
         var pass = Environment.GetEnvironmentVariable("PGPASSWORD") ?? "";
-        return $"Host={pgHost};Port={p};Database={db};Username={user};Password={pass};SSL Mode=Prefer;Trust Server Certificate=true";
+        return $"Host={pgHost};Port={p};Database={db};Username={user};Password={pass};SSL Mode=Prefer;Trust Server Certificate=true;Timeout=3;Command Timeout=5;";
     }
 
     if (conn.StartsWith("postgres://") || conn.StartsWith("postgresql://"))
@@ -51,7 +51,7 @@ static string ResolvePostgresConnection(IConfiguration cfg)
             var host = uri.Host;
             var p = uri.Port > 0 ? uri.Port : 5432;
             var db = uri.AbsolutePath.TrimStart('/');
-            return $"Host={host};Port={p};Database={db};Username={user};Password={pass};SSL Mode=Prefer;Trust Server Certificate=true";
+            return $"Host={host};Port={p};Database={db};Username={user};Password={pass};SSL Mode=Prefer;Trust Server Certificate=true;Timeout=3;Command Timeout=5;";
         }
         catch { }
     }
@@ -60,20 +60,17 @@ static string ResolvePostgresConnection(IConfiguration cfg)
 
 var connStr = ResolvePostgresConnection(cfg);
 b.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(connStr));
+var dbState = new DbProviderState();
+b.Services.AddSingleton(dbState);
 b.Services.AddSingleton<JsonFileAsistenciaRepository>();
 b.Services.AddScoped<IAsistenciaRepository>(sp =>
 {
-    var jsonRepo = sp.GetRequiredService<JsonFileAsistenciaRepository>();
-    try
+    var state = sp.GetRequiredService<DbProviderState>();
+    if (state.UsePostgres)
     {
-        var db = sp.GetRequiredService<AppDbContext>();
-        if (db.Database.CanConnect())
-        {
-            return new AsistenciaRepository(db);
-        }
+        return new AsistenciaRepository(sp.GetRequiredService<AppDbContext>());
     }
-    catch { }
-    return jsonRepo;
+    return sp.GetRequiredService<JsonFileAsistenciaRepository>();
 });
 
 b.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
@@ -99,6 +96,7 @@ var app = b.Build();
 
 using (var s = app.Services.CreateScope())
 {
+    var state = s.ServiceProvider.GetRequiredService<DbProviderState>();
     try
     {
         var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -106,15 +104,18 @@ using (var s = app.Services.CreateScope())
         {
             if (cfg.GetValue("Db:UsarMigraciones", false)) db.Database.Migrate(); 
             else db.Database.EnsureCreated();
+            state.UsePostgres = true;
             Console.WriteLine("[DB] Conectado exitosamente a PostgreSQL.");
         }
         else
         {
+            state.UsePostgres = false;
             Console.WriteLine("[DB] PostgreSQL no disponible. Usando base de datos persistente en data/asistencia_db.json.");
         }
     }
     catch
     {
+        state.UsePostgres = false;
         Console.WriteLine("[DB] PostgreSQL no disponible. Usando base de datos persistente en data/asistencia_db.json.");
     }
 }
@@ -223,3 +224,8 @@ api.MapGet("/sync", async (ClaimsPrincipal u, DateTime? since, IAsistenciaReposi
 api.MapPost("/sync", async (ClaimsPrincipal u, SyncPayload p, IAsistenciaRepository r) => { await r.Push(Uid(u), p); return Results.NoContent(); });
 
 app.Run();
+
+public class DbProviderState
+{
+    public bool UsePostgres { get; set; }
+}
