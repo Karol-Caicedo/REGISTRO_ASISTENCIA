@@ -403,24 +403,12 @@
     applyTheme(currentTheme);
 
     /* ==========================================================================
-       3. CAPA DE PERSISTENCIA LOCAL (REPO)
+       3. ESTADO EN MEMORIA (CENTRALIZADO EN EL SERVIDOR)
        ========================================================================== */
-    const Repo = {
-      load() {
-        try {
-          return JSON.parse(localStorage.getItem('asist_v2')) || { users: {}, data: {} };
-        } catch (_) {
-          return { users: {}, data: {} };
-        }
-      },
-      save(db) {
-        try {
-          localStorage.setItem('asist_v2', JSON.stringify(db));
-        } catch (_) {}
-      }
-    };
-
-    let DB = Repo.load();
+    let GROUPS = [];
+    let TOMB = [];
+    let SYNC_TOKEN = '';
+    let SYNC_USER = '';
 
     /* ==========================================================================
        4. CONECTIVIDAD API & RESOLUCIÓN MULTIDISPOSITIVO
@@ -500,28 +488,19 @@
       newJornada: ''
     };
 
-    const groups = () => (S.user && DB.data[S.user]) ? DB.data[S.user].groups : [];
-    const cur = () => groups().find(g => g.id === S.gid);
-    const SY = () => {
-      if (!S.user || !DB.data[S.user]) return { token: '', since: '1970-01-01T00:00:00.000Z', pushed: '', tomb: [] };
-      return (DB.data[S.user].sync = DB.data[S.user].sync || {
-        token: '',
-        since: '1970-01-01T00:00:00.000Z',
-        pushed: '',
-        tomb: []
-      });
-    };
+    const groups = () => GROUPS;
+    const cur = () => GROUPS.find(g => g.id === S.gid);
+    const SY = () => ({ token: SYNC_TOKEN, tomb: TOMB });
 
     const save = () => {
-      Repo.save(DB);
-      if (S.user) sched();
+      sched(100);
     };
 
     const isValidGuid = id => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(id || ''));
 
-    function normalizeData(D) {
-      if (!D || !D.groups) return;
-      D.groups.forEach(g => {
+    function normalizeData(list) {
+      if (!Array.isArray(list)) return;
+      list.forEach(g => {
         if (!g.id || !isValidGuid(g.id)) g.id = uid();
         if (!g.u) g.u = iso();
         if (!g.materia) g.materia = '';
@@ -535,48 +514,35 @@
           if (!s.id) s.id = '';
           if (!s.nombre) s.nombre = '';
         });
-        for (const d in g.records) {
-          if (typeof g.records[d] !== 'object') continue;
-          for (const sid in g.records[d]) {
-            const k = d + '|' + sid;
-            if (!g.ru[k]) g.ru[k] = iso();
-          }
-        }
+        sortStudents(g);
       });
     }
 
     /* ==========================================================================
-       6. MOTOR DE SINCRONIZACIÓN (MULTI-DISPOSITIVO LAST-WRITE-WINS)
+       6. MOTOR DE SINCRONIZACIÓN AUTOMÁTICA CON LA NUBE
        ========================================================================== */
     let syncBusy = false;
     let syncAgain = false;
     let syncTimer = null;
 
-    const sched = (ms = 1200) => {
+    const sched = (ms = 100) => {
       clearTimeout(syncTimer);
       syncTimer = setTimeout(sync, ms);
     };
 
     async function sync(forceAll = false) {
-      if (!S.user) return { ok: false, error: 'No user' };
+      if (!S.user || !SYNC_TOKEN) return { ok: false, error: 'No user' };
       if (syncBusy) {
         syncAgain = true;
         return { ok: false, busy: true };
       }
-      const em = S.user;
-      const D = DB.data[em];
-      if (!D) return { ok: false };
-      normalizeData(D);
-      const y = SY();
-      if (!y.token) return { ok: false, error: 'Sin sesión activa con el servidor' };
-
       syncBusy = true;
       const ini = iso();
+      normalizeData(GROUPS);
 
       const P = { grupos: [], estudiantes: [], registros: [] };
 
-      // Enviamos todos los grupos y estudiantes actuales para garantizar consistencia total
-      D.groups.forEach(g => {
+      GROUPS.forEach(g => {
         P.grupos.push({
           id: g.id,
           carrera: g.carrera,
@@ -612,131 +578,106 @@
         });
       });
 
-      y.tomb.forEach(t => {
+      TOMB.forEach(t => {
         if (t.t === 'g') {
-          P.grupos.push({ id: t.id, carrera: t.carrera, jornada: t.jornada, materia: t.materia || '', horarios: [], updatedAt: t.u, deleted: true });
+          P.grupos.push({ id: t.id, carrera: t.carrera || '', jornada: t.jornada || '', materia: t.materia || '', horarios: [], updatedAt: t.u, deleted: true });
         } else if (t.t === 'e') {
-          P.estudiantes.push({ id: t.uid, grupoId: t.gid, codigo: t.id, nombreCompleto: t.nombre, updatedAt: t.u, deleted: true });
+          P.estudiantes.push({ id: t.uid, grupoId: t.gid, codigo: t.id, nombreCompleto: t.nombre || '', updatedAt: t.u, deleted: true });
         } else {
           P.registros.push({ id: uid(), estudianteId: t.uid, fecha: t.fecha, presente: false, updatedAt: t.u, deleted: true });
         }
       });
 
       // 1. Enviar cambios al servidor central
-      let r = await api('POST', '/api/sync', P, y.token);
+      let r = await api('POST', '/api/sync', P, SYNC_TOKEN);
       if (!r.ok) {
         syncBusy = false;
         console.error('[SYNC] Error al subir datos:', r);
-        if (r.status === 401) y.token = '';
+        if (r.status === 401) {
+          logout();
+        }
         if (syncAgain) { syncAgain = false; sched(); }
         return { ok: false, status: r.status, error: r.body?.error || 'Error al conectar con el servidor' };
       }
 
-      y.tomb = y.tomb.filter(t => t.u > ini);
-      y.pushed = ini;
+      TOMB = TOMB.filter(t => t.u > ini);
 
-      // 2. Traer todos los datos del servidor (desde 1970 en forzado o si faltan datos locales)
-      const pullSince = (forceAll || !D.groups.length || D.groups.every(g => !g.students || !g.students.length))
-        ? '1970-01-01T00:00:00.000Z'
-        : y.since;
-
-      r = await api('GET', '/api/sync?since=' + encodeURIComponent(pullSince), null, y.token);
+      // 2. Traer todos los datos del servidor central
+      r = await api('GET', '/api/sync?since=1970-01-01T00:00:00.000Z', null, SYNC_TOKEN);
       if (!r.ok) {
         syncBusy = false;
         console.error('[SYNC] Error al descargar datos:', r);
-        if (r.status === 401) y.token = '';
+        if (r.status === 401) {
+          logout();
+        }
         if (syncAgain) { syncAgain = false; sched(); }
         return { ok: false, status: r.status, error: 'Error al descargar datos' };
       }
 
-      const changed = mergeRemoteData(r.body, D);
-      y.since = new Date(Date.parse(r.body.serverTime || ini) - 3e5).toISOString();
-      normalizeData(D);
-      Repo.save(DB);
-
+      mergeRemoteData(r.body);
+      normalizeData(GROUPS);
       syncBusy = false;
 
-      if (S.user === em) {
-        if (!cur() && D.groups.length > 0) {
-          S.gid = D.groups[0].id;
-          S.carrera = D.groups[0].carrera;
-          S.materia = D.groups[0].materia || '';
-        }
-        render();
+      if (!cur() && GROUPS.length > 0) {
+        S.gid = GROUPS[0].id;
+        S.carrera = GROUPS[0].carrera;
+        S.materia = GROUPS[0].materia || '';
       }
+      render();
 
       if (syncAgain) {
         syncAgain = false;
         sched();
       }
 
-      const totalStus = D.groups.reduce((acc, g) => acc + (g.students ? g.students.length : 0), 0);
-      return { ok: true, grupos: D.groups.length, estudiantes: totalStus };
+      const totalStus = GROUPS.reduce((acc, g) => acc + (g.students ? g.students.length : 0), 0);
+      return { ok: true, grupos: GROUPS.length, estudiantes: totalStus };
     }
 
-    async function manualSync() {
-      const btn = $('sync-btn');
-      if (btn) btn.innerHTML = '⏳ Sincronizando…';
-      try {
-        const res = await sync(true);
-        if (res.ok) {
-          alert(`¡Sincronización completada con éxito!\n\n${res.grupos} grupo(s) y ${res.estudiantes} estudiante(s) actualizados con el servidor.`);
-        } else if (res.busy) {
-          alert('Sincronización en curso, por favor espera un momento.');
-        } else {
-          alert(`Aviso de sincronización: ${res.error || 'No se pudo conectar con el servidor.'}`);
-        }
-      } catch (err) {
-        alert('Error durante la sincronización: ' + err.message);
-      } finally {
-        render();
-      }
-    }
-
-    function mergeRemoteData(B, D) {
-      let changed = false;
-      const parseTime = x => Date.parse(x);
+    function mergeRemoteData(B) {
+      if (!B || !Array.isArray(B.grupos)) return false;
 
       // Sincronizar grupos
       B.grupos.forEach(x => {
-        let g = D.groups.find(q => q.id === x.id);
+        let g = GROUPS.find(q => q.id === x.id || (q.carrera === x.carrera && q.jornada === x.jornada && (q.materia || '') === (x.materia || '')));
         if (x.deleted) {
-          if (g && parseTime(x.updatedAt) > parseTime(g.u)) {
-            D.groups = D.groups.filter(q => q !== g);
-            changed = true;
+          if (g) {
+            GROUPS = GROUPS.filter(q => q !== g);
           }
           return;
         }
         if (!g) {
-          D.groups.push(g = {
-            id: x.id, carrera: '', jornada: '', materia: '',
-            horario: [], students: [], records: {}, ru: {}, u: '1970'
+          GROUPS.push(g = {
+            id: x.id, carrera: x.carrera, jornada: x.jornada, materia: x.materia || '',
+            horario: (x.horarios || []).map(h => ({ dia: h.dia, ini: h.inicio, fin: h.fin })),
+            students: [], records: {}, ru: {}, u: x.updatedAt
           });
-          changed = true;
-        }
-        if (parseTime(x.updatedAt) > parseTime(g.u)) {
+        } else {
+          g.id = x.id;
           g.carrera = x.carrera;
           g.jornada = x.jornada;
           g.materia = x.materia || '';
-          g.horario = x.horarios.map(h => ({ dia: h.dia, ini: h.inicio, fin: h.fin }));
+          g.horario = (x.horarios || []).map(h => ({ dia: h.dia, ini: h.inicio, fin: h.fin }));
           g.u = x.updatedAt;
-          changed = true;
         }
       });
 
       // Mapear estudiantes
       const idx = {};
-      D.groups.forEach(g => g.students.forEach(s => idx[s.uid] = [g, s]));
+      GROUPS.forEach(g => g.students.forEach(s => {
+        idx[s.uid] = [g, s];
+        idx[g.id + '|' + s.id] = [g, s];
+      }));
 
-      B.estudiantes.forEach(x => {
-        const g = D.groups.find(q => q.id === x.grupoId);
+      (B.estudiantes || []).forEach(x => {
+        const g = GROUPS.find(q => q.id === x.grupoId);
         if (!g) return;
-        const f = idx[x.id];
+        const f = idx[x.id] || idx[x.grupoId + '|' + x.codigo];
         if (x.deleted) {
-          if (f && parseTime(x.updatedAt) > parseTime(f[1].u)) {
+          if (f) {
             f[0].students = f[0].students.filter(q => q !== f[1]);
             delete idx[x.id];
-            changed = true;
+            delete idx[x.grupoId + '|' + x.codigo];
           }
           return;
         }
@@ -744,24 +685,22 @@
           const s = { uid: x.id, id: x.codigo, nombre: x.nombreCompleto, u: x.updatedAt };
           g.students.push(s);
           idx[x.id] = [g, s];
-          changed = true;
-        } else if (parseTime(x.updatedAt) > parseTime(f[1].u)) {
+          idx[x.grupoId + '|' + x.codigo] = [g, s];
+        } else {
+          f[1].uid = x.id;
           f[1].id = x.codigo;
           f[1].nombre = x.nombreCompleto;
           f[1].u = x.updatedAt;
-          changed = true;
         }
       });
 
       // Sincronizar registros de asistencia
-      B.registros.forEach(x => {
+      (B.registros || []).forEach(x => {
         const f = idx[x.estudianteId];
         if (!f) return;
         const [g, s] = f;
         const k = x.fecha + '|' + s.id;
         g.ru = g.ru || {};
-        if (g.ru[k] && parseTime(x.updatedAt) <= parseTime(g.ru[k])) return;
-
         g.records[x.fecha] = g.records[x.fecha] || {};
         if (x.deleted) {
           delete g.records[x.fecha][s.id];
@@ -769,10 +708,69 @@
           g.records[x.fecha][s.id] = x.presente ? 'P' : 'A';
         }
         g.ru[k] = x.updatedAt;
-        changed = true;
       });
 
-      return changed;
+      GROUPS.forEach(sortStudents);
+      return true;
+    }
+
+    async function migrateLegacyLocalData(tok, em) {
+      try {
+        const raw = localStorage.getItem('asist_v2');
+        if (!raw) return;
+        const legacy = JSON.parse(raw);
+        if (!legacy || !legacy.data) return;
+        const udata = legacy.data[em];
+        if (!udata || !Array.isArray(udata.groups) || udata.groups.length === 0) {
+          localStorage.removeItem('asist_v2');
+          return;
+        }
+
+        const P = { grupos: [], estudiantes: [], registros: [] };
+        udata.groups.forEach(g => {
+          const gid = (g.id && isValidGuid(g.id)) ? g.id : uid();
+          P.grupos.push({
+            id: gid,
+            carrera: g.carrera,
+            jornada: g.jornada,
+            materia: g.materia || '',
+            horarios: (g.horario || []).map(h => ({ dia: +h.dia, inicio: h.ini || h.inicio, fin: h.fin })),
+            updatedAt: g.u || iso(),
+            deleted: false
+          });
+          (g.students || []).forEach(s => {
+            const sid = (s.uid && isValidGuid(s.uid)) ? s.uid : uid();
+            P.estudiantes.push({
+              id: sid,
+              grupoId: gid,
+              codigo: s.id,
+              nombreCompleto: s.nombre,
+              updatedAt: s.u || iso(),
+              deleted: false
+            });
+            for (const d in (g.records || {})) {
+              const v = g.records[d]?.[s.id];
+              if (v) {
+                P.registros.push({
+                  id: uid(),
+                  estudianteId: sid,
+                  fecha: d,
+                  presente: v === 'P',
+                  updatedAt: (g.ru || {})[d + '|' + s.id] || iso(),
+                  deleted: false
+                });
+              }
+            }
+          });
+        });
+
+        if (P.grupos.length > 0 || P.estudiantes.length > 0) {
+          await api('POST', '/api/sync', P, tok);
+        }
+        localStorage.removeItem('asist_v2');
+      } catch (err) {
+        console.warn('Migración local:', err);
+      }
     }
 
     /* ==========================================================================
@@ -896,11 +894,13 @@
     function delGroup() {
       if (confirm('¿Eliminar este grupo y todo su histórico?')) {
         const g0 = cur();
-        SY().tomb.push({ t: 'g', id: g0.id, carrera: g0.carrera, jornada: g0.jornada, materia: g0.materia || '', u: iso() });
-        DB.data[S.user].groups = groups().filter(g => g.id !== S.gid);
-        S.gid = groups()[0]?.id || '';
-        S.carrera = groups()[0]?.carrera || '';
-        S.materia = groups()[0]?.materia || '';
+        if (g0) {
+          TOMB.push({ t: 'g', id: g0.id, carrera: g0.carrera, jornada: g0.jornada, materia: g0.materia || '', u: iso() });
+        }
+        GROUPS = GROUPS.filter(g => g.id !== S.gid);
+        S.gid = GROUPS[0]?.id || '';
+        S.carrera = GROUPS[0]?.carrera || '';
+        S.materia = GROUPS[0]?.materia || '';
         save();
         render();
       }
@@ -1215,49 +1215,33 @@
         return fail('La contraseña debe tener mínimo 8 caracteres, con mayúsculas, minúsculas y números.');
       }
 
-      const lh = await hash(em, pw);
-      let tok = '';
-
-      // Llamada al backend
+      // 1. Llamada al backend
       const r = await api('POST', '/api/auth/' + (reg ? 'register' : 'login'), { email: em, password: pw }, '');
-
-      if (r.net) {
-        // Modo local sin conexión o backend local
-        if (reg) {
-          if (DB.users[em]) return fail('Ese correo ya está registrado.');
-        } else {
-          if (DB.users[em] !== lh) return fail('Correo o contraseña incorrectos.');
-        }
-      } else if (r.ok) {
-        tok = r.body.token;
-      } else if (!reg && r.status === 401 && DB.users[em] === lh) {
-        // Caso de cuenta creada previamente offline cuando el backend no estaba activo
-        const r2 = await api('POST', '/api/auth/register', { email: em, password: pw }, '');
-        if (r2.ok) tok = r2.body.token;
-      } else {
-        return fail(r.body?.error || 'No se pudo iniciar sesión.');
+      if (!r.ok) {
+        return fail(r.body?.error || (reg ? 'No se pudo registrar la cuenta.' : 'Correo o contraseña incorrectos.'));
       }
 
-      DB.users[em] = lh;
-      DB.data[em] = DB.data[em] || { groups: [] };
+      const tok = r.body.token;
+      SYNC_TOKEN = tok;
+      SYNC_USER = em;
       S.user = em;
-      SY().token = tok;
-      try { localStorage.setItem('asist_last_user', em); } catch (_) {}
-      Repo.save(DB);
+      try {
+        localStorage.setItem('asist_token', tok);
+        localStorage.setItem('asist_user', em);
+        localStorage.setItem('asist_last_user', em);
+      } catch (_) {}
 
-      // Traer inmediatamente los datos del servidor central antes de renderizar (forzado desde 1970)
-      if (tok) {
-        try {
-          await sync(true);
-        } catch (_) {}
-      }
+      // 2. Migrar datos locales previos al servidor si existían
+      await migrateLegacyLocalData(tok, em);
+
+      // 3. Traer los datos directamente desde el servidor central
+      await sync(true);
 
       S.err = '';
-      const gs = groups();
-      if (gs && gs.length > 0) {
-        S.gid = gs[0].id;
-        S.carrera = gs[0].carrera || '';
-        S.materia = gs[0].materia || '';
+      if (GROUPS.length > 0) {
+        S.gid = GROUPS[0].id;
+        S.carrera = GROUPS[0].carrera || '';
+        S.materia = GROUPS[0].materia || '';
       } else {
         S.gid = '';
         S.carrera = '';
@@ -1268,12 +1252,16 @@
     }
 
     function logout() {
-      if (S.user) {
-        SY().token = '';
-        Repo.save(DB);
-      }
-      try { localStorage.removeItem('asist_last_user'); } catch (_) {}
+      SYNC_TOKEN = '';
+      SYNC_USER = '';
       S.user = null;
+      GROUPS = [];
+      TOMB = [];
+      try {
+        localStorage.removeItem('asist_token');
+        localStorage.removeItem('asist_user');
+        localStorage.removeItem('asist_last_user');
+      } catch (_) {}
       render();
     }
 
@@ -1283,22 +1271,12 @@
         return fail('Usa un correo Gmail válido (@gmail.com).');
       }
       S.err = '';
-      const tok = uid();
-      let link = window.location.origin + window.location.pathname + '?token=' + tok + '&email=' + encodeURIComponent(em);
-
       const r = await api('POST', '/api/auth/forgot-password', { email: em }, '');
-      if (r.net) {
-        if (!DB.users[em]) return fail('No se encontró una cuenta registrada con ese correo.');
-        DB.tokens = DB.tokens || {};
-        DB.tokens[tok] = { email: em, exp: Date.now() + 3600000 };
-        Repo.save(DB);
-      } else if (r.ok) {
-        if (r.body?.link) link = r.body.link;
-      } else {
-        return fail(r.body?.error || 'No se pudo generar el enlace de recuperación.');
+      if (!r.ok) {
+        return fail(r.body?.error || 'No se encontró una cuenta registrada con ese correo.');
       }
       S.recEmail = em;
-      S.recLink = link;
+      S.recLink = r.body?.link || '';
       S.recSent = true;
       render();
     }
@@ -1324,20 +1302,7 @@
       }
       const em = S.resetEmail, tok = S.resetToken;
       const r = await api('POST', '/api/auth/reset-with-token', { email: em, token: tok, newPassword: pw }, '');
-      const lh = await hash(em, pw);
-      if (r.net) {
-        DB.tokens = DB.tokens || {};
-        const t = DB.tokens[tok];
-        if (!t || t.email !== em || t.exp < Date.now()) {
-          return fail('El enlace de recuperación es inválido o ha expirado.');
-        }
-        DB.users[em] = lh;
-        delete DB.tokens[tok];
-        Repo.save(DB);
-      } else if (r.ok) {
-        DB.users[em] = lh;
-        Repo.save(DB);
-      } else {
+      if (!r.ok) {
         return fail(r.body?.error || 'No se pudo restablecer la contraseña.');
       }
       alert('¡Contraseña actualizada correctamente! Ya puedes iniciar sesión con tu nueva contraseña.');
@@ -1855,7 +1820,6 @@
         <div class="row row-sp" style="margin-bottom:12px">
           <h1>Asistencia</h1>
           <div class="row">
-            <button id="sync-btn" type="button" onclick="manualSync()" title="Sincronizar datos con la nube y otros dispositivos" style="font-size:13px">🔄 Sincronizar</button>
             <button type="button" onclick="toggleTheme()" title="Cambiar tema">${themeBtn()}</button>
             <span class="color-mu" style="font-size:13px;margin:0 4px">${e(S.user)}</span>
             <button onclick="logout()">Salir</button>
@@ -1874,8 +1838,14 @@
     /* ==========================================================================
        15. LISTENERS DE EVENTOS Y PERIODICIDAD
        ========================================================================== */
-    setInterval(() => sched(0), 45000);
-    addEventListener('online', () => sched(0));
+    setInterval(() => { if (S.user) sync(); }, 15000);
+    addEventListener('online', () => { if (S.user) sync(true); });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && S.user) sync(true);
+    });
+    window.addEventListener('focus', () => {
+      if (S.user) sync(true);
+    });
     document.addEventListener('click', e => {
       if (S.calOpen && !e.target.closest('#cal-box') && !e.target.closest('#cal-toggle-btn')) {
         S.calOpen = false;
@@ -1883,21 +1853,34 @@
       }
     });
 
-    // Restaurar sesión guardada si existe y sincronizar en segundo plano
-    try {
-      const lastUser = localStorage.getItem('asist_last_user');
-      if (lastUser && DB.users[lastUser] && DB.data[lastUser]) {
-        S.user = lastUser;
-        normalizeData(DB.data[lastUser]);
-        const gs = groups();
-        if (gs.length > 0) {
-          S.gid = gs[0].id;
-          S.carrera = gs[0].carrera;
-          S.materia = gs[0].materia || '';
+    // Restaurar sesión guardada automáticamente al abrir en cualquier dispositivo
+    (async function initSession() {
+      try {
+        let savedToken = localStorage.getItem('asist_token');
+        let savedUser = localStorage.getItem('asist_user') || localStorage.getItem('asist_last_user');
+
+        if (!savedToken && savedUser) {
+          const raw = localStorage.getItem('asist_v2');
+          if (raw) {
+            try {
+              const legacy = JSON.parse(raw);
+              if (legacy?.data?.[savedUser]?.sync?.token) {
+                savedToken = legacy.data[savedUser].sync.token;
+              }
+            } catch (_) {}
+          }
         }
-        setTimeout(() => sync(true), 350);
-      }
-    } catch (_) {}
+
+        if (savedToken && savedUser) {
+          SYNC_TOKEN = savedToken;
+          SYNC_USER = savedUser;
+          S.user = savedUser;
+          render();
+          await migrateLegacyLocalData(savedToken, savedUser);
+          await sync(true);
+        }
+      } catch (_) {}
+    })();
 
     render();
   </script>

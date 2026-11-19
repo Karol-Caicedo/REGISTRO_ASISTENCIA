@@ -319,11 +319,12 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
         lock (_lock)
         {
             since = Utc(since);
-            var gs = _data.Grupos.Where(g => g.DocenteId == d && g.UpdatedAt > since).ToList();
+            var isAll = since.Year < 2000;
+            var gs = _data.Grupos.Where(g => g.DocenteId == d && (isAll || g.UpdatedAt > since)).ToList();
             var gids = _data.Grupos.Where(g => g.DocenteId == d).Select(g => g.Id).ToHashSet();
-            var es = _data.Estudiantes.Where(e => gids.Contains(e.GrupoId) && e.UpdatedAt > since).ToList();
+            var es = _data.Estudiantes.Where(e => gids.Contains(e.GrupoId) && (isAll || e.UpdatedAt > since)).ToList();
             var eids = _data.Estudiantes.Where(e => gids.Contains(e.GrupoId)).Select(e => e.Id).ToHashSet();
-            var rs = _data.Registros.Where(r => eids.Contains(r.EstudianteId) && r.UpdatedAt > since).ToList();
+            var rs = _data.Registros.Where(r => eids.Contains(r.EstudianteId) && (isAll || r.UpdatedAt > since)).ToList();
 
             var payload = new SyncPayload(
                 gs.Select(g => new SyncGrupo(g.Id, g.Carrera, g.Jornada, g.Horarios.Select(HD).ToList(), g.UpdatedAt, g.Deleted, g.Materia)).ToList(),
@@ -344,10 +345,9 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
             {
                 var t = Utc(sg.UpdatedAt);
                 var effectiveTime = t > now ? t : now;
-                var existing = _data.Grupos.FirstOrDefault(g => g.Id == sg.Id);
+                var existing = _data.Grupos.FirstOrDefault(g => g.Id == sg.Id || (g.DocenteId == d && g.Carrera == sg.Carrera && g.Jornada == sg.Jornada && g.Materia == (sg.Materia ?? "")));
                 if (existing is not null)
                 {
-                    if (t <= existing.UpdatedAt) continue;
                     existing.Carrera = sg.Carrera;
                     existing.Jornada = sg.Jornada;
                     existing.Materia = sg.Materia ?? "";
@@ -375,10 +375,9 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
             {
                 var t = Utc(se.UpdatedAt);
                 var effectiveTime = t > now ? t : now;
-                var existing = _data.Estudiantes.FirstOrDefault(e => e.Id == se.Id);
+                var existing = _data.Estudiantes.FirstOrDefault(e => e.Id == se.Id || (e.GrupoId == se.GrupoId && e.Codigo == se.Codigo));
                 if (existing is not null)
                 {
-                    if (t <= existing.UpdatedAt) continue;
                     existing.Codigo = se.Codigo;
                     existing.NombreCompleto = se.NombreCompleto;
                     existing.Deleted = se.Deleted;

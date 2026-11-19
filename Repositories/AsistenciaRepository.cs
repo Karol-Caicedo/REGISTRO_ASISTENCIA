@@ -114,10 +114,12 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
     public async Task<SyncPayload> Pull(Guid d, DateTime since)
     {
         since = Utc(since);
-        var gs = await db.Grupos.Include(g => g.Horarios).Where(g => g.DocenteId == d && g.UpdatedAt > since).ToListAsync();
+        var isAll = since.Year < 2000;
+        var gs = await db.Grupos.Include(g => g.Horarios).Where(g => g.DocenteId == d && (isAll || g.UpdatedAt > since)).ToListAsync();
         var gids = await db.Grupos.Where(g => g.DocenteId == d).Select(g => g.Id).ToListAsync();
-        var es = await db.Estudiantes.Where(e => gids.Contains(e.GrupoId) && e.UpdatedAt > since).ToListAsync();
-        var rs = await db.Registros.Where(r => gids.Contains(r.Estudiante!.GrupoId) && r.UpdatedAt > since).ToListAsync();
+        var es = await db.Estudiantes.Where(e => gids.Contains(e.GrupoId) && (isAll || e.UpdatedAt > since)).ToListAsync();
+        var eids = (await db.Estudiantes.Where(e => gids.Contains(e.GrupoId)).Select(e => e.Id).ToListAsync()).ToHashSet();
+        var rs = await db.Registros.Where(r => eids.Contains(r.EstudianteId) && (isAll || r.UpdatedAt > since)).ToListAsync();
         return new SyncPayload(
             gs.Select(g => new SyncGrupo(g.Id, g.Carrera, g.Jornada, g.Horarios.Select(HD).ToList(), g.UpdatedAt, g.Deleted, g.Materia)).ToList(),
             es.Select(e => new SyncEstudiante(e.Id, e.GrupoId, e.Codigo, e.NombreCompleto, e.UpdatedAt, e.Deleted)).ToList(),
@@ -135,53 +137,92 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
             var effectiveTime = t > now ? t : now;
             if (mine.TryGetValue(s.Id, out var g))
             {
-                if (t <= g.UpdatedAt) continue;
                 g.Carrera = s.Carrera; g.Jornada = s.Jornada; g.Materia = s.Materia ?? ""; g.Deleted = s.Deleted; g.UpdatedAt = effectiveTime;
                 db.Horarios.RemoveRange(g.Horarios); g.Horarios = s.Horarios.Select(H).ToList();
             }
-            else if (!await db.Grupos.AnyAsync(x => x.Id == s.Id))
+            else
             {
-                var n = new Grupo { Id = s.Id, DocenteId = d, Carrera = s.Carrera, Jornada = s.Jornada, Materia = s.Materia ?? "", Deleted = s.Deleted, UpdatedAt = effectiveTime, Horarios = s.Horarios.Select(H).ToList() };
-                db.Grupos.Add(n); mine[n.Id] = n;
+                var existingGroup = await db.Grupos.Include(x => x.Horarios).FirstOrDefaultAsync(x => x.DocenteId == d && x.Carrera == s.Carrera && x.Jornada == s.Jornada && x.Materia == (s.Materia ?? ""));
+                if (existingGroup is not null)
+                {
+                    existingGroup.Deleted = s.Deleted;
+                    existingGroup.UpdatedAt = effectiveTime;
+                    db.Horarios.RemoveRange(existingGroup.Horarios);
+                    existingGroup.Horarios = s.Horarios.Select(H).ToList();
+                    mine[s.Id] = existingGroup;
+                }
+                else if (!await db.Grupos.AnyAsync(x => x.Id == s.Id))
+                {
+                    var n = new Grupo { Id = s.Id, DocenteId = d, Carrera = s.Carrera, Jornada = s.Jornada, Materia = s.Materia ?? "", Deleted = s.Deleted, UpdatedAt = effectiveTime, Horarios = s.Horarios.Select(H).ToList() };
+                    db.Grupos.Add(n); mine[n.Id] = n; mine[s.Id] = n;
+                }
             }
         }
         await db.SaveChangesAsync();
 
-        var gids = mine.Keys.ToList();
-        var est = await db.Estudiantes.Where(e => gids.Contains(e.GrupoId)).ToDictionaryAsync(e => e.Id);
+        var gids = mine.Values.Select(g => g.Id).Concat(mine.Keys).Distinct().ToList();
+        var est = await db.Estudiantes.Where(e => gids.Contains(e.GrupoId)).ToListAsync();
         foreach (var s in p.Estudiantes)
         {
             var t = Utc(s.UpdatedAt);
             var effectiveTime = t > now ? t : now;
-            if (est.TryGetValue(s.Id, out var e))
+            var targetGrupoId = mine.TryGetValue(s.GrupoId, out var mg) ? mg.Id : s.GrupoId;
+
+            var existingEst = est.FirstOrDefault(e => e.Id == s.Id || (e.GrupoId == targetGrupoId && e.Codigo == s.Codigo));
+            if (existingEst is not null)
             {
-                if (t <= e.UpdatedAt) continue;
-                e.Codigo = s.Codigo; e.NombreCompleto = s.NombreCompleto; e.Deleted = s.Deleted; e.UpdatedAt = effectiveTime;
+                existingEst.Codigo = s.Codigo;
+                existingEst.NombreCompleto = s.NombreCompleto;
+                existingEst.Deleted = s.Deleted;
+                existingEst.UpdatedAt = effectiveTime;
             }
-            else if (mine.ContainsKey(s.GrupoId) && !await db.Estudiantes.AnyAsync(x => x.Id == s.Id))
+            else if (mine.ContainsKey(s.GrupoId) || mine.Values.Any(g => g.Id == targetGrupoId))
             {
-                var n = new Estudiante { Id = s.Id, GrupoId = s.GrupoId, Codigo = s.Codigo, NombreCompleto = s.NombreCompleto, Deleted = s.Deleted, UpdatedAt = effectiveTime };
-                db.Estudiantes.Add(n); est[n.Id] = n;
+                var n = new Estudiante
+                {
+                    Id = s.Id,
+                    GrupoId = targetGrupoId,
+                    Codigo = s.Codigo,
+                    NombreCompleto = s.NombreCompleto,
+                    Deleted = s.Deleted,
+                    UpdatedAt = effectiveTime
+                };
+                db.Estudiantes.Add(n);
+                est.Add(n);
             }
         }
         await db.SaveChangesAsync();
 
-        var eids = est.Keys.ToList();
-        var reg = (await db.Registros.Where(r => eids.Contains(r.EstudianteId)).ToListAsync()).ToDictionary(r => (r.EstudianteId, r.Fecha));
+        var eids = est.Select(e => e.Id).ToList();
+        var reg = (await db.Registros.Where(r => eids.Contains(r.EstudianteId)).ToListAsync())
+            .GroupBy(r => (r.EstudianteId, r.Fecha))
+            .ToDictionary(g => g.Key, g => g.First());
+
         foreach (var s in p.Registros)
         {
-            if (!est.ContainsKey(s.EstudianteId)) continue;
+            var targetEst = est.FirstOrDefault(e => e.Id == s.EstudianteId);
+            if (targetEst is null) continue;
             var t = Utc(s.UpdatedAt);
             var effectiveTime = t > now ? t : now;
-            if (reg.TryGetValue((s.EstudianteId, s.Fecha), out var r))
+            if (reg.TryGetValue((targetEst.Id, s.Fecha), out var r))
             {
-                if (t <= r.UpdatedAt) continue;
-                r.Presente = s.Presente; r.Deleted = s.Deleted; r.UpdatedAt = effectiveTime;
+                r.Presente = s.Presente;
+                r.Deleted = s.Deleted;
+                r.UpdatedAt = effectiveTime;
             }
             else
             {
-                var n = new Registro { Id = s.Id, EstudianteId = s.EstudianteId, Fecha = s.Fecha, Presente = s.Presente, Deleted = s.Deleted, UpdatedAt = effectiveTime };
-                db.Registros.Add(n); reg[(n.EstudianteId, n.Fecha)] = n;
+                var n = new Registro
+                {
+                    Id = s.Id,
+                    EstudianteId = targetEst.Id,
+                    Fecha = s.Fecha,
+                    Presente = s.Presente,
+                    Deleted = s.Deleted,
+                    UpdatedAt = effectiveTime
+                };
+                db.Registros.Add(n);
+                reg[(targetEst.Id, s.Fecha)] = n;
             }
         }
         await db.SaveChangesAsync();

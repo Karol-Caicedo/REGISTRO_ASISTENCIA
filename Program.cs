@@ -19,9 +19,47 @@ if (string.IsNullOrWhiteSpace(jk) || jk.Length < 32 || jk.StartsWith("CAMBIAR"))
     Console.WriteLine("ADVERTENCIA: usando Jwt:Key de ejemplo (solo desarrollo).");
 }
 
-b.WebHost.UseUrls("http://0.0.0.0:5000");
+var port = Environment.GetEnvironmentVariable("PORT") ?? "5000";
+b.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
-b.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(cfg.GetConnectionString("Default")));
+static string ResolvePostgresConnection(IConfiguration cfg)
+{
+    var conn = Environment.GetEnvironmentVariable("DATABASE_URL")
+        ?? Environment.GetEnvironmentVariable("DATABASE_PRIVATE_URL")
+        ?? Environment.GetEnvironmentVariable("POSTGRES_URL")
+        ?? cfg.GetConnectionString("Default")
+        ?? "";
+
+    var pgHost = Environment.GetEnvironmentVariable("PGHOST");
+    if (!string.IsNullOrWhiteSpace(pgHost) && (string.IsNullOrWhiteSpace(conn) || conn.Contains("localhost")))
+    {
+        var p = Environment.GetEnvironmentVariable("PGPORT") ?? "5432";
+        var db = Environment.GetEnvironmentVariable("PGDATABASE") ?? "railway";
+        var user = Environment.GetEnvironmentVariable("PGUSER") ?? "postgres";
+        var pass = Environment.GetEnvironmentVariable("PGPASSWORD") ?? "";
+        return $"Host={pgHost};Port={p};Database={db};Username={user};Password={pass};SSL Mode=Prefer;Trust Server Certificate=true";
+    }
+
+    if (conn.StartsWith("postgres://") || conn.StartsWith("postgresql://"))
+    {
+        try
+        {
+            var uri = new Uri(conn);
+            var userInfo = uri.UserInfo.Split(':');
+            var user = userInfo[0];
+            var pass = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : "";
+            var host = uri.Host;
+            var p = uri.Port > 0 ? uri.Port : 5432;
+            var db = uri.AbsolutePath.TrimStart('/');
+            return $"Host={host};Port={p};Database={db};Username={user};Password={pass};SSL Mode=Prefer;Trust Server Certificate=true";
+        }
+        catch { }
+    }
+    return conn;
+}
+
+var connStr = ResolvePostgresConnection(cfg);
+b.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(connStr));
 b.Services.AddSingleton<JsonFileAsistenciaRepository>();
 b.Services.AddScoped<IAsistenciaRepository>(sp =>
 {
