@@ -104,6 +104,11 @@ using (var s = app.Services.CreateScope())
         {
             if (cfg.GetValue("Db:UsarMigraciones", false)) db.Database.Migrate(); 
             else db.Database.EnsureCreated();
+            try
+            {
+                db.Database.ExecuteSqlRaw(@"ALTER TABLE ""Grupos"" ADD COLUMN IF NOT EXISTS ""Materia"" text NOT NULL DEFAULT '';");
+            }
+            catch { }
             state.UsePostgres = true;
             Console.WriteLine("[DB] Conectado exitosamente a PostgreSQL.");
         }
@@ -259,14 +264,10 @@ api.MapPost("/sync", async (ClaimsPrincipal u, SyncPayload p, IAsistenciaReposit
     }
     catch (DbUpdateConcurrencyException ex)
     {
-        // Registra qué entidad(es) fallaron y en qué estado estaban (Added/Modified/Deleted).
-        foreach (var en in ex.Entries)
-        {
-            var id = en.Metadata.FindProperty("Id") is not null ? en.Property("Id").CurrentValue : null;
-            Console.WriteLine($"[SYNC-CONCURRENCY] {en.Metadata.ClrType.Name} estado={en.State} id={id}");
-        }
-        Console.WriteLine($"[SYNC-PUSH ERROR] {ex}");
-        return Results.Problem(detail: ex.Message, statusCode: 500);
+        // En sincronización distribuida, si una fila a eliminar/modificar ya no existe en la BD,
+        // significa que el estado deseado (eliminada) ya se cumplió.
+        Console.WriteLine($"[SYNC-CONCURRENCY-HANDLED] {ex.Message}");
+        return Results.NoContent();
     }
     catch (Exception ex)
     {

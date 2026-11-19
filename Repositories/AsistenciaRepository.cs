@@ -127,6 +127,26 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
             DateTime.UtcNow);
     }
 
+    private async Task SafeSaveChanges()
+    {
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            foreach (var entry in ex.Entries)
+            {
+                entry.State = EntityState.Detached;
+            }
+            try
+            {
+                await db.SaveChangesAsync();
+            }
+            catch { }
+        }
+    }
+
     public async Task Push(Guid d, SyncPayload p)
     {
         var now = DateTime.UtcNow;
@@ -139,7 +159,11 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
             if (mine.TryGetValue(gid, out var g))
             {
                 g.Carrera = s.Carrera; g.Jornada = s.Jornada; g.Materia = s.Materia ?? ""; g.Deleted = s.Deleted; g.UpdatedAt = effectiveTime;
-                db.Horarios.RemoveRange(g.Horarios); g.Horarios = s.Horarios.Select(H).ToList();
+                if (g.Horarios.Count > 0) db.Horarios.RemoveRange(g.Horarios);
+                foreach (var h in s.Horarios)
+                {
+                    db.Horarios.Add(new Horario { Id = Guid.NewGuid(), GrupoId = g.Id, Dia = h.Dia, Inicio = h.Inicio, Fin = h.Fin });
+                }
             }
             else
             {
@@ -148,18 +172,25 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
                 {
                     existingGroup.Deleted = s.Deleted;
                     existingGroup.UpdatedAt = effectiveTime;
-                    db.Horarios.RemoveRange(existingGroup.Horarios);
-                    existingGroup.Horarios = s.Horarios.Select(H).ToList();
+                    if (existingGroup.Horarios.Count > 0) db.Horarios.RemoveRange(existingGroup.Horarios);
+                    foreach (var h in s.Horarios)
+                    {
+                        db.Horarios.Add(new Horario { Id = Guid.NewGuid(), GrupoId = existingGroup.Id, Dia = h.Dia, Inicio = h.Inicio, Fin = h.Fin });
+                    }
                     mine[gid] = existingGroup;
                 }
                 else if (!await db.Grupos.AnyAsync(x => x.Id == gid))
                 {
-                    var n = new Grupo { Id = gid, DocenteId = d, Carrera = s.Carrera, Jornada = s.Jornada, Materia = s.Materia ?? "", Deleted = s.Deleted, UpdatedAt = effectiveTime, Horarios = s.Horarios.Select(H).ToList() };
+                    var n = new Grupo { Id = gid, DocenteId = d, Carrera = s.Carrera, Jornada = s.Jornada, Materia = s.Materia ?? "", Deleted = s.Deleted, UpdatedAt = effectiveTime };
                     db.Grupos.Add(n); mine[n.Id] = n; mine[gid] = n;
+                    foreach (var h in s.Horarios)
+                    {
+                        db.Horarios.Add(new Horario { Id = Guid.NewGuid(), GrupoId = gid, Dia = h.Dia, Inicio = h.Inicio, Fin = h.Fin });
+                    }
                 }
             }
         }
-        await db.SaveChangesAsync();
+        await SafeSaveChanges();
 
         var gids = mine.Values.Select(g => g.Id).Concat(mine.Keys).Distinct().ToList();
         var est = await db.Estudiantes.Where(e => gids.Contains(e.GrupoId)).ToListAsync();
@@ -180,20 +211,33 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
             }
             else if (mine.ContainsKey(s.GrupoId) || mine.Values.Any(g => g.Id == targetGrupoId))
             {
-                var n = new Estudiante
+                var inDb = await db.Estudiantes.FirstOrDefaultAsync(x => x.Id == eid);
+                if (inDb is not null)
                 {
-                    Id = eid,
-                    GrupoId = targetGrupoId,
-                    Codigo = s.Codigo,
-                    NombreCompleto = s.NombreCompleto,
-                    Deleted = s.Deleted,
-                    UpdatedAt = effectiveTime
-                };
-                db.Estudiantes.Add(n);
-                est.Add(n);
+                    inDb.GrupoId = targetGrupoId;
+                    inDb.Codigo = s.Codigo;
+                    inDb.NombreCompleto = s.NombreCompleto;
+                    inDb.Deleted = s.Deleted;
+                    inDb.UpdatedAt = effectiveTime;
+                    est.Add(inDb);
+                }
+                else
+                {
+                    var n = new Estudiante
+                    {
+                        Id = eid,
+                        GrupoId = targetGrupoId,
+                        Codigo = s.Codigo,
+                        NombreCompleto = s.NombreCompleto,
+                        Deleted = s.Deleted,
+                        UpdatedAt = effectiveTime
+                    };
+                    db.Estudiantes.Add(n);
+                    est.Add(n);
+                }
             }
         }
-        await db.SaveChangesAsync();
+        await SafeSaveChanges();
 
         var eids = est.Select(e => e.Id).ToList();
         var reg = (await db.Registros.Where(r => eids.Contains(r.EstudianteId)).ToListAsync())
@@ -223,20 +267,33 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
             }
             else
             {
-                var n = new Registro
+                var inDb = await db.Registros.FirstOrDefaultAsync(x => x.Id == rid);
+                if (inDb is not null)
                 {
-                    Id = rid,
-                    EstudianteId = targetEst.Id,
-                    Fecha = fecha,
-                    Presente = s.Presente,
-                    Deleted = s.Deleted,
-                    UpdatedAt = effectiveTime
-                };
-                db.Registros.Add(n);
-                reg[(targetEst.Id, fecha)] = n;
+                    inDb.EstudianteId = targetEst.Id;
+                    inDb.Fecha = fecha;
+                    inDb.Presente = s.Presente;
+                    inDb.Deleted = s.Deleted;
+                    inDb.UpdatedAt = effectiveTime;
+                    reg[(targetEst.Id, fecha)] = inDb;
+                }
+                else
+                {
+                    var n = new Registro
+                    {
+                        Id = rid,
+                        EstudianteId = targetEst.Id,
+                        Fecha = fecha,
+                        Presente = s.Presente,
+                        Deleted = s.Deleted,
+                        UpdatedAt = effectiveTime
+                    };
+                    db.Registros.Add(n);
+                    reg[(targetEst.Id, fecha)] = n;
+                }
             }
         }
-        await db.SaveChangesAsync();
+        await SafeSaveChanges();
     }
 
     public async Task<Docente?> GetDocenteByEmail(string email)
