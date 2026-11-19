@@ -121,6 +121,11 @@ using (var s = app.Services.CreateScope())
                         END IF;
                     END $$;
                 ");
+                db.Database.ExecuteSqlRaw(@"
+                    DELETE FROM ""Registros"" WHERE ""Deleted"" = true;
+                    DELETE FROM ""Estudiantes"" WHERE ""Deleted"" = true;
+                    DELETE FROM ""Grupos"" WHERE ""Deleted"" = true;
+                ");
             }
             catch { }
             state.UsePostgres = true;

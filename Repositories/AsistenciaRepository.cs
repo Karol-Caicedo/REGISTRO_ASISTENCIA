@@ -35,16 +35,9 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
 
     public async Task<bool> EliminarGrupo(Guid d, Guid id)
     {
-        var g = await db.Grupos.Include(x => x.Estudiantes).FirstOrDefaultAsync(g => g.Id == id && g.DocenteId == d);
+        var g = await db.Grupos.FirstOrDefaultAsync(g => g.Id == id && g.DocenteId == d);
         if (g is null) return false;
-        var now = DateTime.UtcNow;
-        g.Deleted = true;
-        g.UpdatedAt = now;
-        foreach (var e in g.Estudiantes)
-        {
-            e.Deleted = true;
-            e.UpdatedAt = now;
-        }
+        db.Grupos.Remove(g);
         await SafeSaveChanges();
         return true;
     }
@@ -61,9 +54,11 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
 
     public async Task<bool> EliminarEstudiante(Guid d, Guid gid, Guid eid)
     {
-        var e = await db.Estudiantes.Include(x => x.Grupo).FirstOrDefaultAsync(e => e.Id == eid && (e.GrupoId == gid || (e.Grupo != null && e.Grupo.DocenteId == d)) && !e.Deleted);
+        var e = await db.Estudiantes.Include(x => x.Grupo).FirstOrDefaultAsync(e => e.Id == eid && (e.GrupoId == gid || (e.Grupo != null && e.Grupo.DocenteId == d)));
         if (e is null) return false;
-        e.Deleted = true; e.UpdatedAt = DateTime.UtcNow; await SafeSaveChanges(); return true;
+        db.Estudiantes.Remove(e);
+        await SafeSaveChanges();
+        return true;
     }
 
     public async Task<bool> GuardarAsistencia(Guid d, Guid gid, AsistenciaReq req)
@@ -122,24 +117,15 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
     // ===== Sincronización: last-write-wins por UpdatedAt =====
     public async Task<SyncPayload> Pull(Guid d, DateTime since)
     {
-        since = Utc(since);
-        var isAll = since.Year < 2000;
-        var tombstoneCutoff = DateTime.UtcNow.AddDays(-30);
-        var gs = await db.Grupos.Include(g => g.Horarios)
-            .Where(g => g.DocenteId == d && (isAll ? (!g.Deleted || g.UpdatedAt > tombstoneCutoff) : g.UpdatedAt > since))
-            .ToListAsync();
-        var gids = await db.Grupos.Where(g => g.DocenteId == d).Select(g => g.Id).ToListAsync();
-        var es = await db.Estudiantes
-            .Where(e => gids.Contains(e.GrupoId) && (isAll ? (!e.Deleted || e.UpdatedAt > tombstoneCutoff) : e.UpdatedAt > since))
-            .ToListAsync();
-        var eids = (await db.Estudiantes.Where(e => gids.Contains(e.GrupoId)).Select(e => e.Id).ToListAsync()).ToHashSet();
-        var rs = await db.Registros
-            .Where(r => eids.Contains(r.EstudianteId) && (isAll ? (!r.Deleted || r.UpdatedAt > tombstoneCutoff) : r.UpdatedAt > since))
-            .ToListAsync();
+        var gs = await db.Grupos.Include(g => g.Horarios).Where(g => g.DocenteId == d && !g.Deleted).ToListAsync();
+        var gids = gs.Select(g => g.Id).ToList();
+        var es = await db.Estudiantes.Where(e => gids.Contains(e.GrupoId) && !e.Deleted).ToListAsync();
+        var eids = es.Select(e => e.Id).ToHashSet();
+        var rs = await db.Registros.Where(r => eids.Contains(r.EstudianteId) && !r.Deleted).ToListAsync();
         return new SyncPayload(
-            gs.Select(g => new SyncGrupo(g.Id, g.Carrera, g.Jornada, g.Horarios.Select(HD).ToList(), g.UpdatedAt, g.Deleted, g.Materia)).ToList(),
-            es.Select(e => new SyncEstudiante(e.Id, e.GrupoId, e.Codigo, e.NombreCompleto, e.UpdatedAt, e.Deleted)).ToList(),
-            rs.Select(r => new SyncRegistro(r.Id, r.EstudianteId, r.Fecha.ToString("yyyy-MM-dd"), r.Presente, r.UpdatedAt, r.Deleted)).ToList(),
+            gs.Select(g => new SyncGrupo(g.Id, g.Carrera, g.Jornada, g.Horarios.Select(HD).ToList(), g.UpdatedAt, false, g.Materia)).ToList(),
+            es.Select(e => new SyncEstudiante(e.Id, e.GrupoId, e.Codigo, e.NombreCompleto, e.UpdatedAt, false)).ToList(),
+            rs.Select(r => new SyncRegistro(r.Id, r.EstudianteId, r.Fecha.ToString("yyyy-MM-dd"), r.Presente, r.UpdatedAt, false)).ToList(),
             DateTime.UtcNow);
     }
 
@@ -172,13 +158,28 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
             var gid = s.Id ?? Guid.NewGuid();
             var t = Utc(s.UpdatedAt);
             var effectiveTime = t > now ? t : now;
+
+            if (s.Deleted)
+            {
+                if (mine.TryGetValue(gid, out var gDel))
+                {
+                    db.Grupos.Remove(gDel);
+                    mine.Remove(gid);
+                }
+                else
+                {
+                    var exG = await db.Grupos.FirstOrDefaultAsync(x => x.DocenteId == d && x.Carrera == s.Carrera && x.Jornada == s.Jornada && x.Materia == (s.Materia ?? ""));
+                    if (exG is not null)
+                    {
+                        db.Grupos.Remove(exG);
+                    }
+                }
+                continue;
+            }
+
             if (mine.TryGetValue(gid, out var g))
             {
-                if (g.Deleted && !s.Deleted && t <= g.UpdatedAt)
-                {
-                    continue; // Rechazar resurrección con caché vieja de otro dispositivo
-                }
-                g.Carrera = s.Carrera; g.Jornada = s.Jornada; g.Materia = s.Materia ?? ""; g.Deleted = s.Deleted; g.UpdatedAt = effectiveTime;
+                g.Carrera = s.Carrera; g.Jornada = s.Jornada; g.Materia = s.Materia ?? ""; g.Deleted = false; g.UpdatedAt = effectiveTime;
                 if (g.Horarios.Count > 0) db.Horarios.RemoveRange(g.Horarios);
                 foreach (var h in s.Horarios)
                 {
@@ -190,12 +191,7 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
                 var existingGroup = await db.Grupos.Include(x => x.Horarios).FirstOrDefaultAsync(x => x.DocenteId == d && x.Carrera == s.Carrera && x.Jornada == s.Jornada && x.Materia == (s.Materia ?? ""));
                 if (existingGroup is not null)
                 {
-                    if (existingGroup.Deleted && !s.Deleted && t <= existingGroup.UpdatedAt)
-                    {
-                        mine[gid] = existingGroup;
-                        continue; // Rechazar resurrección con caché vieja
-                    }
-                    existingGroup.Deleted = s.Deleted;
+                    existingGroup.Deleted = false;
                     existingGroup.UpdatedAt = effectiveTime;
                     if (existingGroup.Horarios.Count > 0) db.Horarios.RemoveRange(existingGroup.Horarios);
                     foreach (var h in s.Horarios)
@@ -206,7 +202,7 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
                 }
                 else if (!await db.Grupos.AnyAsync(x => x.Id == gid))
                 {
-                    var n = new Grupo { Id = gid, DocenteId = d, Carrera = s.Carrera, Jornada = s.Jornada, Materia = s.Materia ?? "", Deleted = s.Deleted, UpdatedAt = effectiveTime };
+                    var n = new Grupo { Id = gid, DocenteId = d, Carrera = s.Carrera, Jornada = s.Jornada, Materia = s.Materia ?? "", Deleted = false, UpdatedAt = effectiveTime };
                     db.Grupos.Add(n); mine[n.Id] = n; mine[gid] = n;
                     foreach (var h in s.Horarios)
                     {
@@ -237,23 +233,19 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
 
                 if (toDelete.Count > 0)
                 {
-                    foreach (var td in toDelete)
-                    {
-                        td.Deleted = true;
-                        td.UpdatedAt = effectiveTime;
-                    }
+                    db.Estudiantes.RemoveRange(toDelete);
+                    foreach (var td in toDelete) est.Remove(td);
                 }
                 else if (s.Id.HasValue || !string.IsNullOrEmpty(sCod))
                 {
                     var inDbList = await db.Estudiantes
                         .Include(e => e.Grupo)
-                        .Where(e => e.Grupo != null && e.Grupo.DocenteId == d && !e.Deleted &&
+                        .Where(e => e.Grupo != null && e.Grupo.DocenteId == d &&
                             ((s.Id.HasValue && e.Id == s.Id.Value) || (!string.IsNullOrEmpty(sCod) && e.Codigo == sCod)))
                         .ToListAsync();
-                    foreach (var item in inDbList)
+                    if (inDbList.Count > 0)
                     {
-                        item.Deleted = true;
-                        item.UpdatedAt = effectiveTime;
+                        db.Estudiantes.RemoveRange(inDbList);
                     }
                 }
                 continue;
@@ -335,11 +327,21 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
             var rid = s.Id ?? Guid.NewGuid();
             var t = Utc(s.UpdatedAt);
             var effectiveTime = t > now ? t : now;
-            if (reg.TryGetValue((targetEst.Id, fecha), out var r))
+            if (s.Deleted)
             {
-                r.Presente = s.Presente;
-                r.Deleted = s.Deleted;
-                r.UpdatedAt = effectiveTime;
+                if (r is not null)
+                {
+                    db.Registros.Remove(r);
+                    reg.Remove((targetEst.Id, fecha));
+                }
+                continue;
+            }
+
+            if (reg.TryGetValue((targetEst.Id, fecha), out var r2))
+            {
+                r2.Presente = s.Presente;
+                r2.Deleted = false;
+                r2.UpdatedAt = effectiveTime;
             }
             else
             {
@@ -349,7 +351,7 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
                     inDb.EstudianteId = targetEst.Id;
                     inDb.Fecha = fecha;
                     inDb.Presente = s.Presente;
-                    inDb.Deleted = s.Deleted;
+                    inDb.Deleted = false;
                     inDb.UpdatedAt = effectiveTime;
                     reg[(targetEst.Id, fecha)] = inDb;
                 }
@@ -361,7 +363,7 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
                         EstudianteId = targetEst.Id,
                         Fecha = fecha,
                         Presente = s.Presente,
-                        Deleted = s.Deleted,
+                        Deleted = false,
                         UpdatedAt = effectiveTime
                     };
                     db.Registros.Add(n);

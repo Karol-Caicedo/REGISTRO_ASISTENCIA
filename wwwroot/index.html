@@ -696,12 +696,11 @@
       if (!B || !Array.isArray(B.grupos)) return false;
       const norm = s => String(s || '').trim().toLowerCase();
 
-      // Sincronizar grupos
+      // 1. Grupos del servidor como fuente de verdad
+      const srvGids = new Set((B.grupos || []).map(x => x.id));
+      GROUPS = GROUPS.filter(g => srvGids.has(g.id) || !isValidGuid(g.id));
+
       B.grupos.forEach(x => {
-        if (x.deleted) {
-          GROUPS = GROUPS.filter(q => q.id !== x.id);
-          return;
-        }
         let g = GROUPS.find(q => q.id === x.id || (norm(q.carrera) === norm(x.carrera) && norm(q.jornada) === norm(x.jornada) && norm(q.materia) === norm(x.materia)));
         if (!g) {
           GROUPS.push(g = {
@@ -719,65 +718,44 @@
         }
       });
 
-      // Mapear estudiantes
-      const idx = {};
-      GROUPS.forEach(g => g.students.forEach(s => {
-        idx[s.uid] = [g, s];
-        idx[g.id + '|' + s.id] = [g, s];
-      }));
-
+      // 2. Estudiantes del servidor como fuente de verdad
+      const srvStudentsByGroup = {};
       (B.estudiantes || []).forEach(x => {
-        if (x.deleted) {
-          const xCod = String(x.codigo || '').trim().toLowerCase();
-          GROUPS.forEach(g => {
-            if (g.id === x.grupoId || !x.grupoId) {
-              g.students = (g.students || []).filter(s => s.uid !== x.id && String(s.id || '').trim().toLowerCase() !== xCod);
-            }
-          });
-          delete idx[x.id];
-          delete idx[x.grupoId + '|' + x.codigo];
-          return;
-        }
-
-        // Si está en la lista de eliminaciones pendientes (TOMB), evitar que reaparezca
-        const xCod = String(x.codigo || '').trim().toLowerCase();
-        if (TOMB.some(t => t.t === 'e' && (t.uid === x.id || ((t.gid === x.grupoId || !t.gid) && String(t.id || '').trim().toLowerCase() === xCod)))) {
-          return;
-        }
-
-        const g = GROUPS.find(q => q.id === x.grupoId);
-        if (!g) return;
-        const f = idx[x.id] || idx[x.grupoId + '|' + x.codigo];
-        if (!f) {
-          const s = { uid: x.id, id: x.codigo, nombre: x.nombreCompleto, u: x.updatedAt };
-          g.students.push(s);
-          idx[x.id] = [g, s];
-          idx[x.grupoId + '|' + x.codigo] = [g, s];
-        } else {
-          f[1].uid = x.id;
-          f[1].id = x.codigo;
-          f[1].nombre = x.nombreCompleto;
-          f[1].u = x.updatedAt;
-        }
+        srvStudentsByGroup[x.grupoId] = srvStudentsByGroup[x.grupoId] || [];
+        srvStudentsByGroup[x.grupoId].push(x);
       });
 
-      // Sincronizar registros de asistencia
+      GROUPS.forEach(g => {
+        const sList = srvStudentsByGroup[g.id] || [];
+        const filtered = sList.filter(x => !TOMB.some(t => t.t === 'e' && (t.uid === x.id || String(t.id || '').trim().toLowerCase() === String(x.codigo || '').trim().toLowerCase())));
+        g.students = filtered.map(x => ({
+          uid: x.id,
+          id: x.codigo,
+          nombre: x.nombreCompleto,
+          u: x.updatedAt
+        }));
+        sortStudents(g);
+      });
+
+      // 3. Registros de asistencia
+      const stuByUid = {};
+      GROUPS.forEach(g => {
+        g.records = {};
+        g.ru = {};
+        (g.students || []).forEach(s => {
+          stuByUid[s.uid] = [g, s];
+        });
+      });
+
       (B.registros || []).forEach(x => {
-        const f = idx[x.estudianteId];
+        const f = stuByUid[x.estudianteId];
         if (!f) return;
         const [g, s] = f;
-        const k = x.fecha + '|' + s.id;
-        g.ru = g.ru || {};
         g.records[x.fecha] = g.records[x.fecha] || {};
-        if (x.deleted) {
-          delete g.records[x.fecha][s.id];
-        } else {
-          g.records[x.fecha][s.id] = x.presente ? 'P' : 'A';
-        }
-        g.ru[k] = x.updatedAt;
+        g.records[x.fecha][s.id] = x.presente ? 'P' : 'A';
+        g.ru[x.fecha + '|' + s.id] = x.updatedAt;
       });
 
-      GROUPS.forEach(sortStudents);
       saveCache();
       return true;
     }
