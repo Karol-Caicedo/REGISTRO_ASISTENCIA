@@ -35,9 +35,18 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
 
     public async Task<bool> EliminarGrupo(Guid d, Guid id)
     {
-        var g = await db.Grupos.FirstOrDefaultAsync(g => g.Id == id && g.DocenteId == d && !g.Deleted);
+        var g = await db.Grupos.Include(x => x.Estudiantes).FirstOrDefaultAsync(g => g.Id == id && g.DocenteId == d);
         if (g is null) return false;
-        g.Deleted = true; g.UpdatedAt = DateTime.UtcNow; await db.SaveChangesAsync(); return true;
+        var now = DateTime.UtcNow;
+        g.Deleted = true;
+        g.UpdatedAt = now;
+        foreach (var e in g.Estudiantes)
+        {
+            e.Deleted = true;
+            e.UpdatedAt = now;
+        }
+        await SafeSaveChanges();
+        return true;
     }
 
     public async Task<int> AgregarEstudiantes(Guid d, Guid gid, IEnumerable<EstudianteDto> items)

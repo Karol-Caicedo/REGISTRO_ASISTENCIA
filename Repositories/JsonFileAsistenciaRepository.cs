@@ -172,8 +172,14 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
         {
             var g = _data.Grupos.FirstOrDefault(g => g.Id == id && g.DocenteId == d && !g.Deleted);
             if (g is null) return Task.FromResult(false);
+            var now = DateTime.UtcNow;
             g.Deleted = true;
-            g.UpdatedAt = DateTime.UtcNow;
+            g.UpdatedAt = now;
+            foreach (var e in _data.Estudiantes.Where(x => x.GrupoId == g.Id))
+            {
+                e.Deleted = true;
+                e.UpdatedAt = now;
+            }
             Save();
             return Task.FromResult(true);
         }

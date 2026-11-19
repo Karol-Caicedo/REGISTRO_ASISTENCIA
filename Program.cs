@@ -107,6 +107,20 @@ using (var s = app.Services.CreateScope())
             try
             {
                 db.Database.ExecuteSqlRaw(@"ALTER TABLE ""Grupos"" ADD COLUMN IF NOT EXISTS ""Materia"" text NOT NULL DEFAULT '';");
+                db.Database.ExecuteSqlRaw(@"
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_constraint WHERE conname = 'fk_grupos_docentes_cascade'
+                        ) THEN
+                            DELETE FROM ""Grupos"" WHERE ""DocenteId"" NOT IN (SELECT ""Id"" FROM ""Docentes"");
+                            ALTER TABLE ""Grupos""
+                            ADD CONSTRAINT fk_grupos_docentes_cascade
+                            FOREIGN KEY (""DocenteId"") REFERENCES ""Docentes""(""Id"")
+                            ON DELETE CASCADE;
+                        END IF;
+                    END $$;
+                ");
             }
             catch { }
             state.UsePostgres = true;
