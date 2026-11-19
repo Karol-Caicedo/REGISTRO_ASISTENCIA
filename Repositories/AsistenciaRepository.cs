@@ -329,10 +329,15 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
             var effectiveTime = t > now ? t : now;
             if (s.Deleted)
             {
-                if (r is not null)
+                if (reg.TryGetValue((targetEst.Id, fecha), out var rDel))
                 {
-                    db.Registros.Remove(r);
+                    db.Registros.Remove(rDel);
                     reg.Remove((targetEst.Id, fecha));
+                }
+                else
+                {
+                    var inDbDel = await db.Registros.FirstOrDefaultAsync(x => x.Id == rid || (x.EstudianteId == targetEst.Id && x.Fecha == fecha));
+                    if (inDbDel is not null) db.Registros.Remove(inDbDel);
                 }
                 continue;
             }
