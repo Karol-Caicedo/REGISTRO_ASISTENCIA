@@ -115,11 +115,18 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
     {
         since = Utc(since);
         var isAll = since.Year < 2000;
-        var gs = await db.Grupos.Include(g => g.Horarios).Where(g => g.DocenteId == d && (isAll ? !g.Deleted : g.UpdatedAt > since)).ToListAsync();
-        var gids = await db.Grupos.Where(g => g.DocenteId == d && (isAll ? !g.Deleted : true)).Select(g => g.Id).ToListAsync();
-        var es = await db.Estudiantes.Where(e => gids.Contains(e.GrupoId) && (isAll ? !e.Deleted : e.UpdatedAt > since)).ToListAsync();
-        var eids = (await db.Estudiantes.Where(e => gids.Contains(e.GrupoId) && (isAll ? !e.Deleted : true)).Select(e => e.Id).ToListAsync()).ToHashSet();
-        var rs = await db.Registros.Where(r => eids.Contains(r.EstudianteId) && (isAll ? !r.Deleted : r.UpdatedAt > since)).ToListAsync();
+        var tombstoneCutoff = DateTime.UtcNow.AddDays(-30);
+        var gs = await db.Grupos.Include(g => g.Horarios)
+            .Where(g => g.DocenteId == d && (isAll ? (!g.Deleted || g.UpdatedAt > tombstoneCutoff) : g.UpdatedAt > since))
+            .ToListAsync();
+        var gids = await db.Grupos.Where(g => g.DocenteId == d).Select(g => g.Id).ToListAsync();
+        var es = await db.Estudiantes
+            .Where(e => gids.Contains(e.GrupoId) && (isAll ? (!e.Deleted || e.UpdatedAt > tombstoneCutoff) : e.UpdatedAt > since))
+            .ToListAsync();
+        var eids = (await db.Estudiantes.Where(e => gids.Contains(e.GrupoId)).Select(e => e.Id).ToListAsync()).ToHashSet();
+        var rs = await db.Registros
+            .Where(r => eids.Contains(r.EstudianteId) && (isAll ? (!r.Deleted || r.UpdatedAt > tombstoneCutoff) : r.UpdatedAt > since))
+            .ToListAsync();
         return new SyncPayload(
             gs.Select(g => new SyncGrupo(g.Id, g.Carrera, g.Jornada, g.Horarios.Select(HD).ToList(), g.UpdatedAt, g.Deleted, g.Materia)).ToList(),
             es.Select(e => new SyncEstudiante(e.Id, e.GrupoId, e.Codigo, e.NombreCompleto, e.UpdatedAt, e.Deleted)).ToList(),
@@ -158,6 +165,10 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
             var effectiveTime = t > now ? t : now;
             if (mine.TryGetValue(gid, out var g))
             {
+                if (g.Deleted && !s.Deleted && t <= g.UpdatedAt)
+                {
+                    continue; // Rechazar resurrección con caché vieja de otro dispositivo
+                }
                 g.Carrera = s.Carrera; g.Jornada = s.Jornada; g.Materia = s.Materia ?? ""; g.Deleted = s.Deleted; g.UpdatedAt = effectiveTime;
                 if (g.Horarios.Count > 0) db.Horarios.RemoveRange(g.Horarios);
                 foreach (var h in s.Horarios)
@@ -170,6 +181,11 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
                 var existingGroup = await db.Grupos.Include(x => x.Horarios).FirstOrDefaultAsync(x => x.DocenteId == d && x.Carrera == s.Carrera && x.Jornada == s.Jornada && x.Materia == (s.Materia ?? ""));
                 if (existingGroup is not null)
                 {
+                    if (existingGroup.Deleted && !s.Deleted && t <= existingGroup.UpdatedAt)
+                    {
+                        mine[gid] = existingGroup;
+                        continue; // Rechazar resurrección con caché vieja
+                    }
                     existingGroup.Deleted = s.Deleted;
                     existingGroup.UpdatedAt = effectiveTime;
                     if (existingGroup.Horarios.Count > 0) db.Horarios.RemoveRange(existingGroup.Horarios);
@@ -240,6 +256,10 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
 
             if (existingEst is not null)
             {
+                if (existingEst.Deleted && !s.Deleted && t <= existingEst.UpdatedAt)
+                {
+                    continue; // Rechazar resurrección con caché vieja de otro dispositivo
+                }
                 existingEst.Codigo = sCod;
                 existingEst.NombreCompleto = s.NombreCompleto?.Trim() ?? "";
                 existingEst.Deleted = false;
@@ -250,6 +270,10 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
                 var inDb = s.Id.HasValue ? await db.Estudiantes.FirstOrDefaultAsync(x => x.Id == s.Id.Value) : null;
                 if (inDb is not null)
                 {
+                    if (inDb.Deleted && !s.Deleted && t <= inDb.UpdatedAt)
+                    {
+                        continue; // Rechazar resurrección con caché vieja de otro dispositivo
+                    }
                     inDb.GrupoId = targetGrupoId;
                     inDb.Codigo = sCod;
                     inDb.NombreCompleto = s.NombreCompleto?.Trim() ?? "";
@@ -259,6 +283,13 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
                 }
                 else
                 {
+                    var deletedInDb = await db.Estudiantes.Include(x => x.Grupo).FirstOrDefaultAsync(x =>
+                        x.Grupo != null && x.Grupo.DocenteId == d && x.Deleted && x.Codigo == sCod);
+                    if (deletedInDb is not null && t <= deletedInDb.UpdatedAt)
+                    {
+                        continue; // Rechazar resurrección con caché vieja de otro dispositivo
+                    }
+
                     var n = new Estudiante
                     {
                         Id = eid,

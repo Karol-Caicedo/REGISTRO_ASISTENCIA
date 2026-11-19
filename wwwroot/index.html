@@ -728,12 +728,14 @@
 
       (B.estudiantes || []).forEach(x => {
         if (x.deleted) {
-          const f = idx[x.id] || idx[x.grupoId + '|' + x.codigo];
-          if (f) {
-            f[0].students = f[0].students.filter(q => q !== f[1]);
-            delete idx[x.id];
-            delete idx[x.grupoId + '|' + x.codigo];
-          }
+          const xCod = String(x.codigo || '').trim().toLowerCase();
+          GROUPS.forEach(g => {
+            if (g.id === x.grupoId || !x.grupoId) {
+              g.students = (g.students || []).filter(s => s.uid !== x.id && String(s.id || '').trim().toLowerCase() !== xCod);
+            }
+          });
+          delete idx[x.id];
+          delete idx[x.grupoId + '|' + x.codigo];
           return;
         }
 

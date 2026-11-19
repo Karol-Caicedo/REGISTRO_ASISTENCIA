@@ -320,11 +320,12 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
         {
             since = Utc(since);
             var isAll = since.Year < 2000;
-            var gs = _data.Grupos.Where(g => g.DocenteId == d && (isAll ? !g.Deleted : g.UpdatedAt > since)).ToList();
-            var gids = _data.Grupos.Where(g => g.DocenteId == d && (isAll ? !g.Deleted : true)).Select(g => g.Id).ToHashSet();
-            var es = _data.Estudiantes.Where(e => gids.Contains(e.GrupoId) && (isAll ? !e.Deleted : e.UpdatedAt > since)).ToList();
-            var eids = _data.Estudiantes.Where(e => gids.Contains(e.GrupoId) && (isAll ? !e.Deleted : true)).Select(e => e.Id).ToHashSet();
-            var rs = _data.Registros.Where(r => eids.Contains(r.EstudianteId) && (isAll ? !r.Deleted : r.UpdatedAt > since)).ToList();
+            var tombstoneCutoff = DateTime.UtcNow.AddDays(-30);
+            var gs = _data.Grupos.Where(g => g.DocenteId == d && (isAll ? (!g.Deleted || g.UpdatedAt > tombstoneCutoff) : g.UpdatedAt > since)).ToList();
+            var gids = _data.Grupos.Where(g => g.DocenteId == d).Select(g => g.Id).ToHashSet();
+            var es = _data.Estudiantes.Where(e => gids.Contains(e.GrupoId) && (isAll ? (!e.Deleted || e.UpdatedAt > tombstoneCutoff) : e.UpdatedAt > since)).ToList();
+            var eids = _data.Estudiantes.Where(e => gids.Contains(e.GrupoId)).Select(e => e.Id).ToHashSet();
+            var rs = _data.Registros.Where(r => eids.Contains(r.EstudianteId) && (isAll ? (!r.Deleted || r.UpdatedAt > tombstoneCutoff) : r.UpdatedAt > since)).ToList();
 
             var payload = new SyncPayload(
                 gs.Select(g => new SyncGrupo(g.Id, g.Carrera, g.Jornada, g.Horarios.Select(HD).ToList(), g.UpdatedAt, g.Deleted, g.Materia)).ToList(),
@@ -350,6 +351,12 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
                 var existing = _data.Grupos.FirstOrDefault(g => g.Id == gid || (g.DocenteId == d && g.Carrera == sg.Carrera && g.Jornada == sg.Jornada && g.Materia == (sg.Materia ?? "")));
                 if (existing is not null)
                 {
+                    if (existing.Deleted && !sg.Deleted && t <= existing.UpdatedAt)
+                    {
+                        groupMap[gid] = existing.Id;
+                        groupMap[existing.Id] = existing.Id;
+                        continue;
+                    }
                     existing.Carrera = sg.Carrera;
                     existing.Jornada = sg.Jornada;
                     existing.Materia = sg.Materia ?? "";
@@ -406,6 +413,10 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
                     (e.GrupoId == targetGrupoId && string.Equals(e.Codigo?.Trim(), sCod, StringComparison.OrdinalIgnoreCase)));
                 if (existing is not null)
                 {
+                    if (existing.Deleted && !se.Deleted && t <= existing.UpdatedAt)
+                    {
+                        continue;
+                    }
                     existing.GrupoId = targetGrupoId;
                     existing.Codigo = sCod;
                     existing.NombreCompleto = se.NombreCompleto?.Trim() ?? "";
@@ -414,6 +425,14 @@ public class JsonFileAsistenciaRepository : IAsistenciaRepository
                 }
                 else
                 {
+                    var deletedExisting = _data.Estudiantes.FirstOrDefault(e =>
+                        (e.GrupoId == targetGrupoId || groupMap.ContainsKey(e.GrupoId)) &&
+                        e.Deleted && string.Equals(e.Codigo?.Trim(), sCod, StringComparison.OrdinalIgnoreCase));
+                    if (deletedExisting is not null && t <= deletedExisting.UpdatedAt)
+                    {
+                        continue;
+                    }
+
                     _data.Estudiantes.Add(new Estudiante
                     {
                         Id = eid,
