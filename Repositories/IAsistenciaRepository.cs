@@ -19,4 +19,5 @@ public interface IAsistenciaRepository
     Task<Docente?> GetDocenteByEmail(string email);
     Task<Docente> CreateDocente(string email, string passwordHash);
     Task<bool> UpdatePassword(string email, string passwordHash);
+    Task<bool> EliminarCuenta(Guid d);
 }

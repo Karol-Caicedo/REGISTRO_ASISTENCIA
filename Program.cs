@@ -231,6 +231,9 @@ app.MapPost("/api/auth/reset-password", async (AuthReq r, IAsistenciaRepository 
 // ===== API protegida (cada docente solo ve lo suyo) =====
 var api = app.MapGroup("/api").RequireAuthorization();
 
+api.MapDelete("/account", async (ClaimsPrincipal u, IAsistenciaRepository r) =>
+    await r.EliminarCuenta(Uid(u)) ? Results.NoContent() : Results.NotFound());
+
 api.MapGet("/grupos", async (ClaimsPrincipal u, IAsistenciaRepository r) => (await r.Grupos(Uid(u))).Select(Map));
 api.MapPost("/grupos", async (ClaimsPrincipal u, GrupoDto g, IAsistenciaRepository r) =>
     !Valido(g) ? Results.BadRequest(new { error = "Grupo u horario inválido." }) : Results.Ok(Map(await r.CrearGrupo(Uid(u), g))));

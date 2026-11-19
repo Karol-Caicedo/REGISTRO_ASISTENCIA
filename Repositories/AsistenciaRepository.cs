@@ -402,4 +402,34 @@ public class AsistenciaRepository(AppDbContext db) : IAsistenciaRepository
         await db.SaveChangesAsync();
         return true;
     }
+
+    public async Task<bool> EliminarCuenta(Guid d)
+    {
+        var u = await db.Docentes.FirstOrDefaultAsync(x => x.Id == d);
+        if (u is null) return false;
+
+        var grupos = await db.Grupos
+            .Include(g => g.Horarios)
+            .Include(g => g.Estudiantes)
+            .Where(g => g.DocenteId == d)
+            .ToListAsync();
+
+        var estIds = grupos.SelectMany(g => g.Estudiantes).Select(e => e.Id).ToList();
+        if (estIds.Count > 0)
+        {
+            var registros = await db.Registros.Where(r => estIds.Contains(r.EstudianteId)).ToListAsync();
+            db.Registros.RemoveRange(registros);
+        }
+
+        foreach (var g in grupos)
+        {
+            db.Horarios.RemoveRange(g.Horarios);
+            db.Estudiantes.RemoveRange(g.Estudiantes);
+        }
+        db.Grupos.RemoveRange(grupos);
+        db.Docentes.Remove(u);
+
+        await SafeSaveChanges();
+        return true;
+    }
 }

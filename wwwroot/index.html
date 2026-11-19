@@ -350,6 +350,92 @@
       border-color: var(--ok);
       color: var(--ok);
     }
+
+    /* ==========================================================================
+       8. MENÚ DE PERFIL DESPLEGABLE (ESTILO PILL Y TARJETA)
+       ========================================================================== */
+    .profile-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      padding: 6px 16px;
+      border-radius: 9999px;
+      background: var(--item-bg);
+      border: 1px solid var(--bd);
+      color: var(--tx);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+      transition: all 0.15s ease;
+    }
+
+    .profile-pill:hover {
+      border-color: var(--pr);
+      background: var(--card);
+    }
+
+    .profile-menu {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 8px);
+      z-index: 1000;
+      min-width: 260px;
+      background: var(--card);
+      border: 1px solid var(--bd);
+      border-radius: 12px;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.14);
+      overflow: hidden;
+      animation: profileFadeIn 0.15s ease-out;
+    }
+
+    @keyframes profileFadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(-4px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .profile-menu-email {
+      padding: 14px 18px 12px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--tx);
+      word-break: break-all;
+      border-bottom: 1px solid var(--bd);
+      line-height: 1.35;
+    }
+
+    .profile-menu-item {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 18px;
+      font-size: 14.5px;
+      font-weight: 600;
+      background: transparent;
+      border: none;
+      border-radius: 8px;
+      color: var(--tx);
+      cursor: pointer;
+      text-align: left;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+
+    .profile-menu-item:hover {
+      background: var(--item-bg);
+      color: var(--pr);
+    }
+
+    .profile-menu-item.logout:hover {
+      background: rgba(200, 55, 45, 0.08);
+      color: var(--ko);
+    }
   </style>
 </head>
 
@@ -490,6 +576,7 @@
       histQ: '',    // Búsqueda en Histórico
       calOpen: false,
       calMonth: '',
+      profileOpen: false,
       tmp: [],
       editTmpIdx: -1,
       editSchedIdx: -1,
@@ -502,6 +589,14 @@
     const groups = () => GROUPS;
     const cur = () => GROUPS.find(g => g.id === S.gid);
     const SY = () => ({ token: SYNC_TOKEN, tomb: TOMB });
+
+    function userDisplayName() {
+      if (!S.user) return 'Perfil';
+      const u = String(S.user).toLowerCase();
+      if (u.includes('unipacifico') || u.startsWith('admin')) return 'Proyección Social';
+      const prefix = S.user.split('@')[0];
+      return prefix.replace(/[._-]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    }
 
     function saveCache() {
       if (!S.user) return;
@@ -1320,6 +1415,7 @@
     }
 
     async function logout() {
+      S.profileOpen = false;
       try {
         if (S.user && SYNC_TOKEN && GROUPS.length > 0) {
           await sync();
@@ -1336,6 +1432,55 @@
         localStorage.removeItem('asist_user');
       } catch (_) { }
       render();
+    }
+
+    async function deleteAccount() {
+      S.profileOpen = false;
+      render();
+      const email = S.user;
+      if (!email) return;
+
+      const conf1 = confirm(`¿Estás seguro de que deseas eliminar permanentemente la cuenta "${email}"?\n\nEsta acción borrará definitivamente todos tus grupos, horarios, estudiantes y asistencias registradas tanto en este dispositivo como en la base de datos.`);
+      if (!conf1) return;
+
+      const conf2 = prompt(`Esta acción es IRREVERSIBLE.\nPara confirmar la eliminación definitiva de tu cuenta y todos tus datos asociados, escribe ELIMINAR:`);
+      if (conf2 !== 'ELIMINAR') {
+        if (conf2 !== null) alert('Confirmación incorrecta. No se eliminó la cuenta.');
+        return;
+      }
+
+      const tok = SYNC_TOKEN;
+      try {
+        if (tok) {
+          const res = await api('DELETE', '/api/account', null, tok);
+          if (!res.ok && !res.net) {
+            console.warn('Aviso al eliminar cuenta en el servidor:', res);
+          }
+        }
+      } catch (err) {
+        console.error('Error al solicitar eliminación en el servidor:', err);
+      }
+
+      try {
+        localStorage.removeItem('asist_token');
+        localStorage.removeItem('asist_user');
+        localStorage.removeItem('asist_last_user');
+        localStorage.removeItem('asist_cache_' + email);
+        localStorage.removeItem('asist_tomb_' + email);
+      } catch (_) { }
+
+      SYNC_TOKEN = '';
+      SYNC_USER = '';
+      S.user = null;
+      S.gid = null;
+      S.carrera = '';
+      S.materia = '';
+      GROUPS = [];
+      TOMB = [];
+      S.mode = 'login';
+      S.err = '';
+      render();
+      alert('Tu cuenta y todos tus registros han sido eliminados correctamente.');
     }
 
     async function sendRecoveryEmail() {
@@ -1902,17 +2047,52 @@
       if (!has) S.tab = 'grupos';
 
       $('app').innerHTML = `
-        <div class="row row-sp" style="margin-bottom:12px">
+        <div class="row row-sp" style="margin-bottom:12px;align-items:center">
           <h1>Asistencia</h1>
-          <div class="row" style="align-items:center;gap:6px">
-            <button type="button" onclick="toggleTheme()" title="Cambiar tema">${themeBtn()}</button>
-            <span class="color-mu" style="font-size:13px;margin:0 4px">${e(S.user)}</span>
-            <button onclick="logout()">Salir</button>
+          <div class="row" style="align-items:center;gap:8px">
+            <button type="button" onclick="toggleTheme()" title="Cambiar tema" style="padding:6px 12px;border-radius:9999px;font-size:13px">${themeBtn()}</button>
+            <div style="position:relative">
+              <button id="profile-btn" type="button" class="profile-pill" onclick="S.profileOpen=!S.profileOpen;render()" title="Perfil de usuario">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--tx);flex-shrink:0">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <circle cx="12" cy="10" r="3"></circle>
+                  <path d="M6.168 18.849A4 4 0 0 1 10 16h4a4 4 0 0 1 3.834 2.855"></path>
+                </svg>
+                <span>${e(userDisplayName())}</span>
+              </button>
+              ${S.profileOpen ? `
+                <div id="profile-box" class="profile-menu">
+                  <div class="profile-menu-email">
+                    ${e(S.user)}
+                  </div>
+                  <div style="padding:6px;display:flex;flex-direction:column;gap:3px">
+                    <button type="button" class="profile-menu-item" onclick="logout()">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                        <polyline points="16 17 21 12 16 7"></polyline>
+                        <line x1="21" y1="12" x2="9" y2="12"></line>
+                      </svg>
+                      <span>Cerrar sesión</span>
+                    </button>
+                    <div style="height:1px;background:var(--bd);margin:3px 4px"></div>
+                    <button type="button" class="profile-menu-item logout" onclick="deleteAccount()" style="color:var(--ko)">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        <line x1="10" y1="11" x2="10" y2="17"></line>
+                        <line x1="14" y1="11" x2="14" y2="17"></line>
+                      </svg>
+                      <span>Eliminar cuenta</span>
+                    </button>
+                  </div>
+                </div>
+              ` : ''}
+            </div>
           </div>
         </div>
 
         <div class="tabs">
-          ${T.map(([k, l]) => `<button class="${S.tab === k ? 'active' : ''}" onclick="S.tab='${k}';S.calOpen=false;render()">${l}</button>`).join('')}
+          ${T.map(([k, l]) => `<button class="${S.tab === k ? 'active' : ''}" onclick="S.tab='${k}';S.calOpen=false;S.profileOpen=false;render()">${l}</button>`).join('')}
         </div>
 
         ${has ? selV() : ''}
@@ -1933,10 +2113,16 @@
       if (S.user) sync(true);
     });
     document.addEventListener('click', e => {
+      let changed = false;
       if (S.calOpen && !e.target.closest('#cal-box') && !e.target.closest('#cal-toggle-btn')) {
         S.calOpen = false;
-        render();
+        changed = true;
       }
+      if (S.profileOpen && !e.target.closest('#profile-box') && !e.target.closest('#profile-btn')) {
+        S.profileOpen = false;
+        changed = true;
+      }
+      if (changed) render();
     });
 
     window.addEventListener('beforeunload', () => {
